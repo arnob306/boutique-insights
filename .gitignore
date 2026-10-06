@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg-info/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+*.stackdump
+.DS_Store
+Thumbs.db
+.history/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Runtime logs
+logs/
+
+data/processed/
+data/cache/
+data/vector_store/
+
+# Real business data and anything derived from it. NEVER commit.
+data/private/
+reports/private/
+*Boutique_Sales*.xlsx
+!data/synthetic/*.xlsx
+
+# Environment variables
+.env
+.env.local

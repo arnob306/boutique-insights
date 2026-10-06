@@ -1,0 +1,31 @@
+name: Python CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  python-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install pytest pytest-cov pyyaml pandas numpy openpyxl python-dotenv
+
+      - name: Run tests
+        run: >
+          pytest tests/ -v
+          --cov=src.adapters --cov=src.metrics --cov=src.reports
+          --cov=src.validation --cov=src.privacy --cov=src.run
+          --cov=src.stock_template --cov=src.schema
+          --cov-fail-under=80
