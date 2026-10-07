@@ -25,6 +25,7 @@ from src.reports.weekly import (
     WeeklyReport,
     money,
     money_bullet,
+    reminder_text,
 )
 
 WEEKS_SHOWN = 26
@@ -301,6 +302,12 @@ def _playbook(r: WeeklyReport) -> str:
     return f'{items}<p class="note">{_esc(PLAYBOOK_FOOTER)}</p>'
 
 
+def _reminders(r: WeeklyReport) -> str:
+    if r.reminder_count is None:
+        return ''
+    return f'<p>{_esc(reminder_text(r.reminder_count))}</p>'
+
+
 def _section(title: str, body: str) -> str:
     return f'<section><h2>{_esc(title)}</h2>{body}</section>' if body else ''
 
@@ -320,6 +327,7 @@ def render_dashboard(r: WeeklyReport, series: pd.DataFrame) -> str:
         _section('Weekly sales', _sales_chart(series)),
         _section('Reorder this week', _reorder(r)),
         _section('Festival playbook', _playbook(r)),
+        _section('Customers to nudge', _reminders(r)),
         _section('Profit by product (last 12 months)', _profit_rows(earners)),
         _section('Things to check in the data', _list(r.data_notes)),
     ])

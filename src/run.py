@@ -5,6 +5,10 @@ Usage:
     python -m src.run --profile synthetic            # demo, no secrets needed
     python -m src.run --profile private              # newest file in the inbox
     python -m src.run --profile private --send       # ...and email the report
+    python -m src.run --profile private --reminders  # ...and list customers due a nudge
+
+--reminders writes a local file with real customer names to data/private/output/.
+The email and dashboard only ever say how many are due.
 
 A private run also adds the week's recommendations to the decision log
 (data/private/decisions.sqlite); --decision-log PATH picks another file.
@@ -17,6 +21,7 @@ import logging
 import shutil
 import sys
 import zipfile
+from dataclasses import replace
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -30,6 +35,7 @@ from src.decisions.store import DecisionLogError
 from src.metrics.calendar import DEFAULT_CALENDAR_PATH, load_calendar
 from src.metrics.trends import weekly_series
 from src.privacy import PrivacyError, get_salt
+from src.reminders import Reminders, build_reminders, load_customer_rows, write_reminders
 from src.reports.dashboard import WEEKS_SHOWN, render_dashboard
 from src.reports.delivery import (
     DeliveryError,
@@ -83,6 +89,9 @@ def _parse_args(argv) -> argparse.Namespace:
     parser.add_argument('--decision-log', type=Path, metavar='PATH',
                         help='record recommendations here (private profile '
                              'defaults to <private-root>/decisions.sqlite)')
+    parser.add_argument('--reminders', action='store_true',
+                        help='also list repeat customers due a nudge, with their '
+                             'names, in a local file (private profile only)')
     parser.add_argument('--today', help='override today (YYYY-MM-DD)')
     parser.add_argument('--stock-template', type=Path, metavar='PATH',
                         help='write a blank Stock & Orders sheet and stop')
@@ -164,6 +173,27 @@ def _load(workbook: Path, salt: str):
             f'{workbook.name} could not be opened as an Excel workbook.') from None
 
 
+def _load_reminders(args, workbook: Path, today: pd.Timestamp) -> Optional[Reminders]:
+    """Who is due a nudge, read straight from the workbook (names stay here)."""
+    if not args.reminders:
+        return None
+    try:
+        rows = load_customer_rows(workbook)
+    except SchemaError as exc:  # a ValueError, so it must come before that one
+        raise InputError(str(exc)) from None
+    except (zipfile.BadZipFile, OSError, ValueError):
+        raise InputError(
+            f'{workbook.name} could not be read for the reminders list.') from None
+    return build_reminders(rows, today)
+
+
+def _write_reminders(args, reminders: Optional[Reminders], today: pd.Timestamp) -> None:
+    if reminders is None:
+        return
+    path = write_reminders(reminders, args.private_root / 'output', today)
+    _say(f'Reminders list written to {path} (it has customer names: keep it local).')
+
+
 def _email(report, sales, sender) -> None:
     settings = EmailSettings.from_env()
     message = build_message(subject(report), render_text(report),
@@ -228,11 +258,16 @@ def main(argv=None, *, sender=send_email, env_file: Optional[str] = '.env') -> i
              '--demo-output so the report is not written into the repo '
              f'folder ({DEFAULT_DEMO_OUTPUT}).')
         return EXIT_INPUT
+    if args.reminders and args.profile != 'private':
+        _say('Cannot run: --reminders lists real customer names, so it only '
+             'works with --profile private.')
+        return EXIT_INPUT
     today = pd.Timestamp(args.today or pd.Timestamp.today()).normalize()
 
     try:
         workbook = _find_workbook(args)
         data = _load(workbook, _salt_for(args.profile))
+        reminders = _load_reminders(args, workbook, today)
     except (InputError, PrivacyError) as exc:
         _say(f'Cannot run: {exc}')
         return EXIT_INPUT
@@ -243,12 +278,15 @@ def main(argv=None, *, sender=send_email, env_file: Optional[str] = '.env') -> i
         return EXIT_OK
 
     report = _build_report(data, today)
+    if report.trusted and reminders is not None:
+        report = replace(report, reminder_count=reminders.due_count)
     _write_all(args, report, data.sales)
 
     if not report.trusted:
         _say('The data has problems, so the report was not emailed or archived.')
         return EXIT_UNTRUSTED
     _record_decisions(args, data, today)
+    _write_reminders(args, reminders, today)
     if args.send:
         try:
             _email(report, data.sales, sender)

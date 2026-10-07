@@ -73,6 +73,7 @@ class WeeklyReport:
     overall_margin: Optional[float]
     data_notes: Tuple[str, ...]
     trusted: bool
+    reminder_count: Optional[int] = None  # a count only; names never go in a report
 
 
 # --- building --------------------------------------------------------------
@@ -236,6 +237,15 @@ def reorder_bullet(line: ReorderLine) -> str:
     return text
 
 
+def reminder_text(count: int) -> str:
+    """The reminder line for the email and dashboard: how many, never who."""
+    if count == 0:
+        return 'Nobody is due a nudge this week.'
+    noun = 'repeat customer is' if count == 1 else 'repeat customers are'
+    return (f'{count} {noun} due a nudge. The list is saved on your computer, '
+            'not in this email.')
+
+
 def money_bullet(line: MoneyLine) -> str:
     margin = f', {line.margin * 100:.0f}% margin' if line.margin is not None else ''
     return f'{line.product}: {money(line.profit)} profit{margin}, {line.units_sold} sold.'
@@ -261,6 +271,8 @@ def _sections(r: WeeklyReport) -> list:
     if r.playbook:
         sections.append(('Festival playbook', PLAYBOOK_FOOTER,
                          tuple(item.text for item in r.playbook)))
+    if r.reminder_count is not None:
+        sections.append(('Customers to nudge', reminder_text(r.reminder_count), ()))
     sections.append((
         "What's making money (last 12 months)", money_intro,
         tuple(money_bullet(l) for l in r.top_earners),

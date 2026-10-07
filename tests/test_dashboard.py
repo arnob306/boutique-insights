@@ -182,5 +182,13 @@ def test_the_festival_playbook_is_on_the_dashboard(workbook_path):
     assert 'not financial advice' in page
 
 
+def test_the_dashboard_shows_the_reminder_count_only_when_there_is_one(built):
+    _, report, series = built
+    assert 'Customers to nudge' not in render_dashboard(report, series)
+    page = render_dashboard(replace(report, reminder_count=7), series)
+    assert 'Customers to nudge' in page
+    assert '7 repeat customers are due a nudge' in page
+
+
 def test_the_dashboard_has_no_playbook_section_without_a_calendar(page):
     assert 'Festival playbook' not in page

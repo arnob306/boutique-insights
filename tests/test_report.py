@@ -138,6 +138,25 @@ def test_playbook_uses_the_stock_sheets_lead_time_when_there_is_one(workbook_pat
     assert not report.playbook[0].lead_assumed
 
 
+def test_no_reminder_count_means_no_reminder_section(built):
+    assert built[1].reminder_count is None
+    assert 'Customers to nudge' not in render_text(built[1])
+
+
+@pytest.mark.parametrize('count, wording', [
+    (0, 'Nobody is due a nudge'),
+    (1, '1 repeat customer is due a nudge'),
+    (12, '12 repeat customers are due a nudge'),
+])
+def test_the_reminder_section_gives_only_a_count(built, count, wording):
+    report = replace(built[1], reminder_count=count)
+    for page in (render_text(report), render_html(report)):
+        assert 'Customers to nudge' in page
+        assert wording in page
+    if count:
+        assert 'saved on your computer' in render_text(report)
+
+
 def test_playbook_is_in_the_text_and_html_email_with_its_footer(workbook_path):
     probe = load_workbook_data(workbook_path, salt=SALT)
     start = probe.sales['date'].max() + 40 * DAY

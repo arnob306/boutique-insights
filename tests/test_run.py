@@ -11,6 +11,7 @@ from src.decisions.store import (
     list_recommendations,
     open_log,
 )
+from src.reminders import PRIVACY_NOTE, build_reminders, load_customer_rows
 from src.reports.delivery import DeliveryError
 from src.run import main
 
@@ -289,3 +290,78 @@ def test_private_run_scores_recommendations_whose_window_has_passed(
     with open_log(log) as conn:
         assert len(list_outcomes(conn)) == 1
     assert '1 outcome' in capsys.readouterr().out
+
+
+# --- repeat-customer reminders (names stay in one local file) -----------------
+
+def _reminder_file(private_root):
+    return private_root / 'output' / f'reminders_{TODAY}.txt'
+
+
+def _expected_reminders(workbook_path):
+    return build_reminders(load_customer_rows(workbook_path), TODAY)
+
+
+def test_reminders_are_off_unless_asked_for(private_root, inbox_file, with_salt):
+    assert _private(private_root) == 0
+    assert not list((private_root / 'output').glob('reminders_*'))
+    assert 'Customers to nudge' not in next(
+        (private_root / 'output').glob('weekly_*.txt')).read_text(encoding='utf-8')
+
+
+def test_the_reminders_flag_writes_a_local_list_with_a_privacy_note(
+        private_root, inbox_file, with_salt, workbook_path):
+    expected = _expected_reminders(workbook_path)
+    assert expected.due_count > 0  # the synthetic data has someone due
+    assert _private(private_root, '--reminders') == 0
+    text = _reminder_file(private_root).read_text(encoding='utf-8')
+    assert PRIVACY_NOTE in text
+    assert all(line.name in text for line in expected.due)
+    assert not inbox_file.exists()  # still archived afterwards
+
+
+def test_names_stay_out_of_everything_except_the_reminders_file(
+        private_root, inbox_file, with_salt, workbook_path, monkeypatch, capsys):
+    names = set(pd.read_excel(workbook_path, sheet_name='Sales')['Customer'].dropna())
+    for key, value in SMTP_ENV.items():
+        monkeypatch.setenv(key, value)
+    sender = Recorder()
+    code = _private(private_root, '--reminders', '--dashboard', '--send', sender=sender)
+    assert code == 0
+    seen = capsys.readouterr().out
+    for path in (private_root / 'output').iterdir():
+        if not path.name.startswith('reminders_'):
+            seen += path.read_text(encoding='utf-8')
+    for part in sender.sent[0].walk():
+        if part.get_content_maintype() == 'text':
+            seen += part.get_content()
+    seen += (private_root / 'decisions.sqlite').read_bytes().decode('latin-1')
+    assert not any(name in seen for name in names)
+    assert 'Customers to nudge' in seen  # the email carries the count
+
+
+def test_the_report_count_matches_the_list(
+        private_root, inbox_file, with_salt, workbook_path):
+    expected = _expected_reminders(workbook_path)
+    assert _private(private_root, '--reminders') == 0
+    report = next((private_root / 'output').glob('weekly_*.txt')).read_text(
+        encoding='utf-8')
+    assert f'{expected.due_count} repeat customer' in report
+
+
+def test_reminders_are_refused_for_the_synthetic_profile(
+        workbook_path, tmp_path, capsys):
+    code = _run('--profile', 'synthetic', '--file', str(workbook_path),
+                '--demo-output', str(tmp_path / 'demo'), '--reminders')
+    assert code == 2
+    out = capsys.readouterr().out
+    assert '--reminders' in out and 'private' in out
+    assert not list(tmp_path.rglob('reminders_*'))
+
+
+def test_untrusted_data_writes_no_reminders(
+        private_root, with_salt, make_workbook):
+    shutil.copy(make_workbook(problems={'duplicate_id'}),
+                private_root / 'inbox' / 'bad.xlsx')
+    assert _private(private_root, '--reminders') == 1
+    assert not list((private_root / 'output').glob('reminders_*'))
