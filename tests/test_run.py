@@ -1,8 +1,16 @@
 import shutil
+from datetime import date
 
 import pandas as pd
 import pytest
 
+from src.decisions.store import (
+    Recommendation,
+    add_recommendations,
+    list_outcomes,
+    list_recommendations,
+    open_log,
+)
 from src.reports.delivery import DeliveryError
 from src.run import main
 
@@ -216,3 +224,57 @@ def test_the_attached_dashboard_has_no_customer_names(
     names = set(pd.read_excel(workbook_path, sheet_name='Sales')['Customer'].dropna())
     attached = _send_with_dashboard(private_root, monkeypatch)[0].get_content()
     assert not any(name in attached for name in names)
+
+
+def test_private_run_logs_recommendations_next_to_the_private_data(
+        private_root, inbox_file, with_salt):
+    assert _private(private_root) == 0
+    with open_log(private_root / 'decisions.sqlite') as conn:
+        kinds = {r.kind for r in list_recommendations(conn)}
+    assert kinds == {'forecast', 'reorder'}
+
+
+def test_untrusted_data_writes_nothing_to_the_decision_log(
+        private_root, with_salt, make_workbook):
+    shutil.copy(make_workbook(problems={'duplicate_id'}),
+                private_root / 'inbox' / 'bad.xlsx')
+    assert _private(private_root) == 1
+    assert not (private_root / 'decisions.sqlite').exists()
+
+
+def test_synthetic_demo_does_not_write_a_decision_log(workbook_path, tmp_path):
+    code = _run('--profile', 'synthetic', '--file', str(workbook_path),
+                '--demo-output', str(tmp_path / 'demo'))
+    assert code == 0
+    assert not list(tmp_path.rglob('*.sqlite'))
+
+
+def test_decision_log_flag_chooses_the_location(workbook_path, tmp_path):
+    log = tmp_path / 'elsewhere' / 'log.sqlite'
+    code = _run('--profile', 'synthetic', '--file', str(workbook_path),
+                '--demo-output', str(tmp_path / 'demo'), '--decision-log', str(log))
+    assert code == 0
+    with open_log(log) as conn:
+        assert list_recommendations(conn)
+
+
+def test_a_broken_decision_log_does_not_stop_the_report(
+        private_root, inbox_file, with_salt, capsys):
+    (private_root / 'decisions.sqlite').write_text('not a database', encoding='utf-8')
+    assert _private(private_root) == 0
+    assert 'decision log' in capsys.readouterr().out.lower()
+    assert list((private_root / 'output').glob('weekly_*.html'))
+
+
+def test_private_run_scores_recommendations_whose_window_has_passed(
+        private_root, inbox_file, with_salt, capsys):
+    log = private_root / 'decisions.sqlite'
+    with open_log(log) as conn:
+        add_recommendations(conn, [Recommendation(
+            as_of=date(2026, 8, 1), product='Silk Saree', kind='forecast',
+            model='velocity-v1', horizon_weeks=2, suggested_qty=0,
+            expected_demand=3.0, confidence='good')])
+    assert _private(private_root) == 0
+    with open_log(log) as conn:
+        assert len(list_outcomes(conn)) == 1
+    assert '1 outcome' in capsys.readouterr().out

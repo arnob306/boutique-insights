@@ -46,6 +46,9 @@ data/private/
 reports/private/
 *Boutique_Sales*.xlsx
 !data/synthetic/*.xlsx
+# The decision log, wherever --decision-log points, plus SQLite's side files
+*.sqlite
+*.sqlite-*
 
 # Environment variables
 .env

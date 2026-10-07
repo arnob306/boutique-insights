@@ -11,6 +11,11 @@ PRIVATE_PATHS = [
     'data/private/archive/2026-10-06_sales.xlsx',
     'data/private/output/weekly_report.html',
     'data/private/output/dashboard_2026-10-06.html',
+    'data/private/decisions.sqlite',
+    'decisions.sqlite',
+    'elsewhere/log.sqlite',
+    'data/decisions.sqlite-wal',
+    'data/decisions.sqlite-journal',
 ]
 
 

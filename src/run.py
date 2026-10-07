@@ -6,6 +6,9 @@ Usage:
     python -m src.run --profile private              # newest file in the inbox
     python -m src.run --profile private --send       # ...and email the report
 
+A private run also adds the week's recommendations to the decision log
+(data/private/decisions.sqlite); --decision-log PATH picks another file.
+
 Exit codes: 0 ok, 1 data not trusted, 2 setup or input problem, 3 email failed.
 """
 
@@ -21,6 +24,9 @@ import pandas as pd
 from dotenv import load_dotenv
 
 from src.adapters.boutique_xlsx import SchemaError, load_workbook_data
+from src.decisions.evaluate import evaluate_log
+from src.decisions.record import record_week
+from src.decisions.store import DecisionLogError
 from src.metrics.calendar import DEFAULT_CALENDAR_PATH, load_calendar
 from src.metrics.trends import weekly_series
 from src.privacy import PrivacyError, get_salt
@@ -45,6 +51,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_PRIVATE_ROOT = Path('data/private')
 SYNTHETIC_WORKBOOK = Path('data/synthetic/boutique_synthetic.xlsx')
 DEFAULT_DEMO_OUTPUT = Path('reports/demo')
+DECISION_LOG_NAME = 'decisions.sqlite'
 LOCK_PREFIX = '~$'  # Excel's temporary file while a workbook is open
 DEMO_SALT = 'synthetic-demo-salt-not-a-secret'
 
@@ -73,6 +80,9 @@ def _parse_args(argv) -> argparse.Namespace:
                         help='also write a one-page dashboard')
     parser.add_argument('--private-root', type=Path, default=DEFAULT_PRIVATE_ROOT)
     parser.add_argument('--demo-output', type=Path, default=DEFAULT_DEMO_OUTPUT)
+    parser.add_argument('--decision-log', type=Path, metavar='PATH',
+                        help='record recommendations here (private profile '
+                             'defaults to <private-root>/decisions.sqlite)')
     parser.add_argument('--today', help='override today (YYYY-MM-DD)')
     parser.add_argument('--stock-template', type=Path, metavar='PATH',
                         help='write a blank Stock & Orders sheet and stop')
@@ -162,12 +172,40 @@ def _email(report, sales, sender) -> None:
     sender(settings, message)
 
 
+def _calendar() -> list:
+    return (load_calendar(DEFAULT_CALENDAR_PATH)
+            if DEFAULT_CALENDAR_PATH.exists() else [])
+
+
 def _build_report(data, today):
     validation = validate_import(data, as_of=today)
     _say(validation.to_text())
-    calendar = (load_calendar(DEFAULT_CALENDAR_PATH)
-                if DEFAULT_CALENDAR_PATH.exists() else [])
-    return build_weekly_report(data, validation, today=today, calendar=calendar)
+    return build_weekly_report(data, validation, today=today, calendar=_calendar())
+
+
+def _decision_log_path(args) -> Optional[Path]:
+    """Where to log this run's recommendations, or None for no log."""
+    if args.decision_log:
+        return args.decision_log
+    if args.profile == 'private':
+        return args.private_root / DECISION_LOG_NAME
+    return None
+
+
+def _record_decisions(args, data, today: pd.Timestamp) -> None:
+    """Score old recommendations and log this week's; a log problem never
+    stops the report."""
+    path = _decision_log_path(args)
+    if path is None:
+        return
+    try:
+        scored = evaluate_log(data.sales, path, today.date())
+        added = record_week(data, path, calendar=_calendar())
+    except DecisionLogError as exc:
+        _say(f'Decision log not updated: {exc}')
+        return
+    _say(f'Decision log: {added} new recommendation(s) recorded, '
+         f'{scored} outcome(s) scored.')
 
 
 def _write_all(args, report, sales) -> None:
@@ -210,6 +248,7 @@ def main(argv=None, *, sender=send_email, env_file: Optional[str] = '.env') -> i
     if not report.trusted:
         _say('The data has problems, so the report was not emailed or archived.')
         return EXIT_UNTRUSTED
+    _record_decisions(args, data, today)
     if args.send:
         try:
             _email(report, data.sales, sender)

@@ -28,7 +28,7 @@ COLUMNS = [
 ]
 
 
-def _confidence(sales_count: int) -> str:
+def confidence_label(sales_count: int) -> str:
     if sales_count < LOW_CONFIDENCE_BELOW:
         return 'low'
     return 'good' if sales_count >= GOOD_CONFIDENCE_FROM else 'medium'
@@ -72,7 +72,7 @@ def _suggest(row, sales, velocity, categories, calendar, uplift, as_of) -> dict:
         'product': product, 'stock_now': stock_now, 'on_order': on_order,
         'units_per_week': per_week,
         'lead_weeks': int(row.weeks_to_arrive),
-        'confidence': _confidence(sales_count),
+        'confidence': confidence_label(sales_count),
     }
     if not per_week > 0:
         return {**base, 'weeks_of_cover': math.inf, 'expected_demand': 0.0,
