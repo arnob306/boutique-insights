@@ -1,9 +1,11 @@
 from dataclasses import replace
 
+import pandas as pd
 import pytest
 from test_report import _build
 
 from src.adapters.boutique_xlsx import load_workbook_data
+from src.metrics.calendar import FestivalWindow
 from src.metrics.trends import weekly_series
 from src.reports.dashboard import WEEKS_SHOWN, render_dashboard
 from src.reports.weekly import ReorderLine, money
@@ -162,3 +164,23 @@ def test_one_week_is_not_pluralised(built):
     assert 'lasts 1 week;' in page
     assert 'takes 1 week.' in page
     assert '1 weeks' not in page
+
+
+def _with_festival(workbook_path, days_ahead):
+    probe = load_workbook_data(workbook_path, salt=SALT)
+    start = probe.sales['date'].max() + days_ahead * pd.Timedelta(days=1)
+    calendar = [FestivalWindow('Durga Puja', start, start + pd.Timedelta(days=10))]
+    data, report = _build(workbook_path, calendar=calendar)
+    return render_dashboard(report, weekly_series(
+        data.sales, report.data_through, WEEKS_SHOWN))
+
+
+def test_the_festival_playbook_is_on_the_dashboard(workbook_path):
+    page = _with_festival(workbook_path, days_ahead=40)
+    assert 'Festival playbook' in page
+    assert 'Durga Puja' in page
+    assert 'not financial advice' in page
+
+
+def test_the_dashboard_has_no_playbook_section_without_a_calendar(page):
+    assert 'Festival playbook' not in page

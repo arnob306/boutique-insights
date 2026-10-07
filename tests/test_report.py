@@ -111,12 +111,42 @@ def test_an_upcoming_festival_is_announced_with_its_effect(workbook_path):
     start = probe.sales['date'].max() + 11 * DAY
     calendar = [FestivalWindow('Durga Puja', start, start + 10 * DAY)]
     _, report = _build(workbook_path, calendar=calendar)
-    assert any('Durga Puja' in line and 'starts in 10 days' in line
-               for line in report.coming_up)
+    item = next(i for i in report.playbook if i.festival == 'Durga Puja')
+    assert item.stage == 'preview'
+    assert 'Durga Puja' in render_text(report)
 
 
-def test_no_festival_means_no_coming_up_lines(built):
-    assert built[1].coming_up == ()
+def test_no_festival_means_no_playbook(built):
+    assert built[1].playbook == ()
+    assert 'Festival playbook' not in render_text(built[1])
+
+
+def test_playbook_uses_the_default_lead_time_without_a_stock_sheet(workbook_path):
+    probe = load_workbook_data(workbook_path, salt=SALT)
+    start = probe.sales['date'].max() + 70 * DAY
+    calendar = [FestivalWindow('Durga Puja', start, start + 10 * DAY)]
+    _, report = _build(workbook_path, calendar=calendar, drop_stock=True)
+    assert report.playbook[0].lead_assumed
+    assert 'assum' in render_text(report).lower()
+
+
+def test_playbook_uses_the_stock_sheets_lead_time_when_there_is_one(workbook_path):
+    probe = load_workbook_data(workbook_path, salt=SALT)
+    start = probe.sales['date'].max() + 70 * DAY
+    calendar = [FestivalWindow('Durga Puja', start, start + 10 * DAY)]
+    _, report = _build(workbook_path, calendar=calendar)
+    assert not report.playbook[0].lead_assumed
+
+
+def test_playbook_is_in_the_text_and_html_email_with_its_footer(workbook_path):
+    probe = load_workbook_data(workbook_path, salt=SALT)
+    start = probe.sales['date'].max() + 40 * DAY
+    calendar = [FestivalWindow('Durga Puja', start, start + 10 * DAY)]
+    _, report = _build(workbook_path, calendar=calendar)
+    for page in (render_text(report), render_html(report)):
+        assert 'Festival playbook' in page
+        assert 'Durga Puja' in page
+        assert 'not financial advice' in page
 
 
 def test_critical_problems_make_the_report_untrusted(make_workbook):

@@ -17,6 +17,7 @@ from typing import Iterable, Optional
 
 import pandas as pd
 
+from src.reports.playbook import PLAYBOOK_FOOTER
 from src.reports.weekly import (
     UNTRUSTED_BANNER,
     MoneyLine,
@@ -293,6 +294,13 @@ def _list(items: Iterable[str]) -> str:
     return f'<ul class="plain">{entries}</ul>' if entries else ''
 
 
+def _playbook(r: WeeklyReport) -> str:
+    if not r.playbook:
+        return ''
+    items = _list(item.text for item in r.playbook)
+    return f'{items}<p class="note">{_esc(PLAYBOOK_FOOTER)}</p>'
+
+
 def _section(title: str, body: str) -> str:
     return f'<section><h2>{_esc(title)}</h2>{body}</section>' if body else ''
 
@@ -311,7 +319,7 @@ def render_dashboard(r: WeeklyReport, series: pd.DataFrame) -> str:
         f'<div class="hero">{_hero(r)}</div>',
         _section('Weekly sales', _sales_chart(series)),
         _section('Reorder this week', _reorder(r)),
-        _section('Coming up', _list(r.coming_up)),
+        _section('Festival playbook', _playbook(r)),
         _section('Profit by product (last 12 months)', _profit_rows(earners)),
         _section('Things to check in the data', _list(r.data_notes)),
     ])

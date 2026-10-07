@@ -16,6 +16,12 @@ from src.adapters.boutique_xlsx import WorkbookData
 from src.metrics.patterns import festival_uplift
 from src.metrics.products import product_performance
 from src.metrics.reorder import reorder_suggestions
+from src.reports.playbook import (
+    PLAYBOOK_FOOTER,
+    PlaybookItem,
+    build_playbook,
+    lead_weeks_from_stock,
+)
 from src.validation.report import ImportReport
 
 CURRENCY = '$'
@@ -26,9 +32,6 @@ LOOKBACK_DAYS = 364
 MAX_REORDER_LINES = 8
 TOP_EARNERS = 5
 SMALL_EARNERS = 3
-COMING_UP_DAYS = 56
-MIN_UPLIFT_TO_MENTION = 1.5
-MAX_UPLIFT_CATEGORIES = 2
 
 
 @dataclass(frozen=True)
@@ -64,7 +67,7 @@ class WeeklyReport:
     refunds_this_week: int
     reorder: Tuple[ReorderLine, ...]
     reorder_status: str  # 'orders' | 'nothing' | 'no_stock_sheet'
-    coming_up: Tuple[str, ...]
+    playbook: Tuple[PlaybookItem, ...]
     top_earners: Tuple[MoneyLine, ...]
     small_earners: Tuple[MoneyLine, ...]
     overall_margin: Optional[float]
@@ -126,29 +129,9 @@ def _reorder_lines(data, as_of, calendar, uplift):
     return lines, ('orders' if lines else 'nothing')
 
 
-def _festival_effect(uplift: pd.DataFrame, name: str) -> str:
-    rows = uplift[
-        (uplift['festival'] == name) & (uplift['uplift'] >= MIN_UPLIFT_TO_MENTION)
-    ].sort_values('uplift', ascending=False).head(MAX_UPLIFT_CATEGORIES)
-    if rows.empty:
-        return ''
-    parts = [f'{r.category} (about {r.uplift:.1f}x)' for r in rows.itertuples()]
-    return ' Usually sells faster: ' + ', '.join(parts) + '.'
-
-
-def _coming_up(calendar, uplift, today) -> Tuple[str, ...]:
-    horizon = today + pd.Timedelta(days=COMING_UP_DAYS)
-    lines = []
-    for window in sorted(calendar, key=lambda w: w.start):
-        if window.end < today or window.start > horizon:
-            continue
-        days = (window.start - today).days
-        if days > 0:
-            lead = f'{window.name} starts in {days} days ({window.start:%d %b}).'
-        else:
-            lead = f'{window.name} is on now (until {window.end:%d %b}).'
-        lines.append(lead + _festival_effect(uplift, window.name))
-    return tuple(lines)
+def _playbook(data, calendar, uplift, today) -> Tuple[PlaybookItem, ...]:
+    lead_weeks, assumed = lead_weeks_from_stock(data.stock)
+    return build_playbook(calendar, uplift, today, lead_weeks, assumed)
 
 
 def _money_line(row) -> MoneyLine:
@@ -196,7 +179,7 @@ def build_weekly_report(
         data_through=data_through, week_start=week_start, week_end=data_through,
         **_weekly_totals(sales, week_start, data_through),
         reorder=reorder, reorder_status=status,
-        coming_up=_coming_up(calendar, uplift, today),
+        playbook=_playbook(data, calendar, uplift, today),
         top_earners=top, small_earners=small, overall_margin=margin,
         data_notes=notes, trusted=import_report.ok,
     )
@@ -275,8 +258,9 @@ def _sections(r: WeeklyReport) -> list:
         ('This week', _this_week_text(r), ()),
         ('Reorder this week', reorder[0], reorder[1]),
     ]
-    if r.coming_up:
-        sections.append(('Coming up', None, r.coming_up))
+    if r.playbook:
+        sections.append(('Festival playbook', PLAYBOOK_FOOTER,
+                         tuple(item.text for item in r.playbook)))
     sections.append((
         "What's making money (last 12 months)", money_intro,
         tuple(money_bullet(l) for l in r.top_earners),
