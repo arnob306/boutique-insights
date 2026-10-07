@@ -197,5 +197,13 @@ def test_the_dashboard_shows_festival_reminder_counts(built):
     assert '9 customers bought at Durga Puja last year' in page
 
 
+def test_the_dashboard_has_a_mix_and_channels_section(built, page):
+    _, report, series = built
+    assert 'Mix and channels' in page
+    assert report.mix_notes[0].split(' ')[0] in page
+    assert 'Mix and channels' not in render_dashboard(
+        replace(report, mix_notes=()), series)
+
+
 def test_the_dashboard_has_no_playbook_section_without_a_calendar(page):
     assert 'Festival playbook' not in page

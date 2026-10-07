@@ -14,6 +14,7 @@ import pandas as pd
 
 from src.adapters.boutique_xlsx import WorkbookData
 from src.metrics.cashplan import build_cash_plan
+from src.metrics.mix import category_mix, channel_mix, mix_notes
 from src.metrics.patterns import festival_uplift
 from src.metrics.products import product_performance
 from src.metrics.reorder import reorder_suggestions
@@ -76,6 +77,7 @@ class WeeklyReport:
     trusted: bool
     reminder_count: Optional[int] = None  # a count only; names never go in a report
     festival_reminder_counts: Tuple[Tuple[str, int], ...] = ()  # (festival, how many)
+    mix_notes: Tuple[str, ...] = ()  # category and channel mix, last 12 months
 
 
 # --- building --------------------------------------------------------------
@@ -190,6 +192,8 @@ def build_weekly_report(
         playbook=_playbook(data, calendar, uplift, today, margin),
         top_earners=top, small_earners=small, overall_margin=margin,
         data_notes=notes, trusted=import_report.ok,
+        mix_notes=mix_notes(category_mix(sales, data_through),
+                            channel_mix(sales, data_through)),
     )
 
 
@@ -292,6 +296,8 @@ def _sections(r: WeeklyReport) -> list:
             'Small earners', 'These made the least profit in the last 12 months:',
             tuple(money_bullet(l) for l in r.small_earners),
         ))
+    if r.mix_notes:
+        sections.append(('Mix and channels (last 12 months)', None, r.mix_notes))
     if r.data_notes:
         sections.append(('Things to check in the data', None, r.data_notes))
     return sections

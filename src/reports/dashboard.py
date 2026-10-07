@@ -332,6 +332,7 @@ def render_dashboard(r: WeeklyReport, series: pd.DataFrame) -> str:
         _section('Festival playbook', _playbook(r)),
         _section('Customers to nudge', _reminders(r)),
         _section('Profit by product (last 12 months)', _profit_rows(earners)),
+        _section('Mix and channels (last 12 months)', _list(r.mix_notes)),
         _section('Things to check in the data', _list(r.data_notes)),
     ])
     return (

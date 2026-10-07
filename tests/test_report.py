@@ -170,6 +170,19 @@ def test_no_festival_counts_adds_no_festival_lines(built):
     assert 'bought at' not in render_text(report)
 
 
+def test_the_report_has_a_mix_and_channels_section(built):
+    report = built[1]
+    assert report.mix_notes
+    for page in (render_text(report), render_html(report)):
+        assert 'Mix and channels' in page
+        assert all(note.split(' ')[0] in page for note in report.mix_notes)
+
+
+def test_no_mix_notes_means_no_mix_section(built):
+    report = replace(built[1], mix_notes=())
+    assert 'Mix and channels' not in render_text(report)
+
+
 def _report_with_festival(workbook_path, days_ahead=70):
     probe = load_workbook_data(workbook_path, salt=SALT)
     start = probe.sales['date'].max() + days_ahead * DAY
