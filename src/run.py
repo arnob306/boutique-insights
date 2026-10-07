@@ -157,11 +157,11 @@ def _load(workbook: Path, salt: str):
         return load_workbook_data(workbook, salt=salt)
     except FileNotFoundError:
         raise InputError(f'Workbook not found: {workbook.name}') from None
-    except (zipfile.BadZipFile, OSError):
+    except SchemaError as exc:  # a ValueError, so it must come before that one
+        raise InputError(str(exc)) from None
+    except (zipfile.BadZipFile, OSError, ValueError):
         raise InputError(
             f'{workbook.name} could not be opened as an Excel workbook.') from None
-    except SchemaError as exc:
-        raise InputError(str(exc)) from None
 
 
 def _email(report, sales, sender) -> None:

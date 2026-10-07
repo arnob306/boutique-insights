@@ -106,6 +106,17 @@ def test_unreadable_workbook_is_reported_without_a_traceback(
     assert broken.exists()  # not archived when it failed
 
 
+def test_a_file_that_is_not_a_workbook_is_reported_without_a_traceback(
+        private_root, with_salt, capsys):
+    broken = private_root / 'inbox' / 'broken.xlsx'
+    broken.write_text('not a workbook', encoding='utf-8')
+    assert _private(private_root) == 2
+    out = capsys.readouterr().out
+    assert 'broken.xlsx could not be opened as an Excel workbook' in out
+    assert 'engine' not in out  # no library jargon
+    assert broken.exists()  # not archived when it failed
+
+
 def test_untrusted_data_is_never_emailed_or_archived(
         private_root, with_salt, make_workbook, monkeypatch):
     for key, value in SMTP_ENV.items():
