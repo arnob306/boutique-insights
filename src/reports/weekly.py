@@ -74,6 +74,7 @@ class WeeklyReport:
     data_notes: Tuple[str, ...]
     trusted: bool
     reminder_count: Optional[int] = None  # a count only; names never go in a report
+    festival_reminder_counts: Tuple[Tuple[str, int], ...] = ()  # (festival, how many)
 
 
 # --- building --------------------------------------------------------------
@@ -246,6 +247,11 @@ def reminder_text(count: int) -> str:
             'not in this email.')
 
 
+def festival_reminder_line(festival: str, count: int) -> str:
+    noun = 'customer' if count == 1 else 'customers'
+    return f'{count} {noun} bought at {festival} last year.'
+
+
 def money_bullet(line: MoneyLine) -> str:
     margin = f', {line.margin * 100:.0f}% margin' if line.margin is not None else ''
     return f'{line.product}: {money(line.profit)} profit{margin}, {line.units_sold} sold.'
@@ -272,7 +278,10 @@ def _sections(r: WeeklyReport) -> list:
         sections.append(('Festival playbook', PLAYBOOK_FOOTER,
                          tuple(item.text for item in r.playbook)))
     if r.reminder_count is not None:
-        sections.append(('Customers to nudge', reminder_text(r.reminder_count), ()))
+        sections.append((
+            'Customers to nudge', reminder_text(r.reminder_count),
+            tuple(festival_reminder_line(f, n) for f, n in r.festival_reminder_counts),
+        ))
     sections.append((
         "What's making money (last 12 months)", money_intro,
         tuple(money_bullet(l) for l in r.top_earners),

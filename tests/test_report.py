@@ -157,6 +157,19 @@ def test_the_reminder_section_gives_only_a_count(built, count, wording):
         assert 'saved on your computer' in render_text(report)
 
 
+def test_festival_reminder_counts_appear_as_numbers_only(built):
+    report = replace(built[1], reminder_count=3,
+                     festival_reminder_counts=(('Durga Puja', 9), ('Diwali / Kali Puja', 1)))
+    for page in (render_text(report), render_html(report)):
+        assert '9 customers bought at Durga Puja last year' in page
+        assert '1 customer bought at Diwali / Kali Puja last year' in page
+
+
+def test_no_festival_counts_adds_no_festival_lines(built):
+    report = replace(built[1], reminder_count=3)
+    assert 'bought at' not in render_text(report)
+
+
 def test_playbook_is_in_the_text_and_html_email_with_its_footer(workbook_path):
     probe = load_workbook_data(workbook_path, salt=SALT)
     start = probe.sales['date'].max() + 40 * DAY

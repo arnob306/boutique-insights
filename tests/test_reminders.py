@@ -2,15 +2,21 @@ import pandas as pd
 import pytest
 
 from src.adapters.boutique_xlsx import SchemaError
+from src.metrics.calendar import FestivalWindow
 from src.reminders import (
     DUE_WINDOW_DAYS,
+    FESTIVAL_LIST_DAYS,
     LAPSE_FACTOR,
+    MATCH_TOLERANCE_DAYS,
     MAX_LINES,
     MIN_GAP_DAYS,
     PRIVACY_NOTE,
+    RECENT_BUYER_DAYS,
+    build_festival_reminders,
     build_reminders,
     load_customer_rows,
     render_reminders,
+    write_reminders,
 )
 
 TODAY = pd.Timestamp('2026-10-01')
@@ -194,6 +200,184 @@ def test_the_text_mentions_customers_beyond_the_list_and_those_gone_quiet():
     text = render_reminders(_build(*purchases), TODAY)
     assert f'{MAX_LINES + 2} repeat customers' in text
     assert '1 more' in text or 'gone quiet' in text
+
+
+# --- festival-linked reminders ----------------------------------------------
+
+def _festival(name='Durga Puja', starts_in=20, length=12):
+    start = TODAY + starts_in * DAY
+    return FestivalWindow(name, start, start + (length - 1) * DAY)
+
+
+def _past(window, years_back=1, shift=0):
+    """A past window of the same festival, ``years_back`` x 364 days earlier."""
+    start = window.start - 364 * years_back * DAY + shift * DAY
+    end = window.end - 364 * years_back * DAY + shift * DAY
+    return {'festival': window.name, 'start': start, 'end': end, 'rows': 10}
+
+
+def _past_frame(*windows):
+    return pd.DataFrame(list(windows), columns=['festival', 'start', 'end', 'rows'])
+
+
+def _at(window, years_back, offset, name, category='Saree', amount=100.0, **extra):
+    """A purchase ``offset`` days into the window's past occurrence."""
+    date = window.start - 364 * years_back * DAY + offset * DAY
+    return (name, (TODAY - date).days, category, amount, *extra.values())
+
+
+def _in_past_window(past, name, offset=3):
+    """A purchase ``offset`` days into a window from ``_past``."""
+    return (name, (TODAY - past['start']).days - offset, 'Saree', 100.0)
+
+
+def _festival_lists(purchases, calendar, past, today=TODAY):
+    return build_festival_reminders(_rows(*purchases), calendar, past, today)
+
+
+DURGA = _festival()
+
+
+def test_a_customer_who_bought_in_last_years_window_is_listed():
+    lists = _festival_lists([_at(DURGA, 1, 3, 'Asha Test')], [DURGA],
+                            _past_frame(_past(DURGA)))
+    assert [l.festival for l in lists] == ['Durga Puja']
+    assert [r.name for r in lists[0].regulars] == ['Asha Test']
+
+
+def test_a_one_time_buyer_is_listed_because_one_festival_is_enough():
+    lists = _festival_lists([_at(DURGA, 1, 3, 'Ben Test')], [DURGA],
+                            _past_frame(_past(DURGA)))
+    assert lists[0].regulars[0].name == 'Ben Test'
+
+
+def test_buying_outside_last_years_window_does_not_count():
+    lists = _festival_lists([_at(DURGA, 1, -40, 'Asha Test')], [DURGA],
+                            _past_frame(_past(DURGA)))
+    assert lists == ()
+
+
+def test_someone_who_just_bought_is_left_out():
+    recent = ('Asha Test', RECENT_BUYER_DAYS, 'Saree', 50.0)
+    lists = _festival_lists([_at(DURGA, 1, 3, 'Asha Test'), recent], [DURGA],
+                            _past_frame(_past(DURGA)))
+    assert lists == ()
+
+
+def test_someone_who_bought_a_while_ago_is_still_listed():
+    older = ('Asha Test', RECENT_BUYER_DAYS + 1, 'Saree', 50.0)
+    lists = _festival_lists([_at(DURGA, 1, 3, 'Asha Test'), older], [DURGA],
+                            _past_frame(_past(DURGA)))
+    assert len(lists) == 1
+
+
+def test_a_festival_is_listed_only_in_the_weeks_before_it():
+    on_edge = _festival(starts_in=FESTIVAL_LIST_DAYS)
+    too_far = _festival(starts_in=FESTIVAL_LIST_DAYS + 1)
+    assert len(_festival_lists([_at(on_edge, 1, 3, 'Asha Test')], [on_edge],
+                               _past_frame(_past(on_edge)))) == 1
+    assert _festival_lists([_at(too_far, 1, 3, 'Asha Test')], [too_far],
+                           _past_frame(_past(too_far))) == ()
+
+
+def test_a_festival_that_has_started_is_not_listed():
+    started = _festival(starts_in=-2)
+    lists = _festival_lists([_at(started, 1, 3, 'Asha Test')], [started],
+                            _past_frame(_past(started)))
+    assert lists == ()
+
+
+def test_a_festival_with_no_past_window_gives_no_list():
+    assert _festival_lists([_at(DURGA, 1, 3, 'Asha Test')], [DURGA],
+                           _past_frame()) == ()
+
+
+def test_the_past_window_must_be_about_a_year_back():
+    far = _past(DURGA, shift=MATCH_TOLERANCE_DAYS + 1)
+    near = _past(DURGA, shift=MATCH_TOLERANCE_DAYS)
+    assert _festival_lists([_in_past_window(far, 'Asha Test')], [DURGA],
+                           _past_frame(far)) == ()
+    assert len(_festival_lists([_in_past_window(near, 'Asha Test')], [DURGA],
+                               _past_frame(near))) == 1
+
+
+def test_the_window_nearest_a_year_back_is_used_when_a_festival_repeats():
+    eid = _festival('Eid', starts_in=10)
+    match = _past(eid)
+    other = _past(eid, shift=-40)  # a second Eid earlier in that year
+    purchases = [_at(eid, 1, 3, 'Right Test'), _in_past_window(other, 'Wrong Test')]
+    lists = _festival_lists(purchases, [eid], _past_frame(match, other))
+    assert [r.name for r in lists[0].regulars] == ['Right Test']
+
+
+def test_regulars_are_ranked_by_last_years_spend_and_capped():
+    purchases = [_at(DURGA, 1, 3, f'Person {i:02d} Test', amount=10.0 + i)
+                 for i in range(MAX_LINES + 4)]
+    lists = _festival_lists(purchases, [DURGA], _past_frame(_past(DURGA)))
+    assert len(lists[0].regulars) == MAX_LINES
+    assert lists[0].count == MAX_LINES + 4
+    assert lists[0].regulars[0].name == f'Person {MAX_LINES + 3:02d} Test'
+
+
+def test_the_line_shows_last_years_category_spend_and_festivals_attended():
+    purchases = [
+        _at(DURGA, 1, 3, 'Asha Test', 'Saree', 300.0),
+        _at(DURGA, 1, 4, 'Asha Test', 'Bangles', 20.0),
+        _at(DURGA, 2, 3, 'Asha Test', 'Saree', 100.0),
+        _at(DURGA, 2, 3, 'Ben Test', 'Saree', 100.0),
+    ]
+    past = _past_frame(_past(DURGA, 1), _past(DURGA, 2))
+    regular = _festival_lists(purchases, [DURGA], past)[0].regulars[0]
+    assert regular.name == 'Asha Test'
+    assert regular.top_category == 'Saree'
+    assert regular.spend == pytest.approx(320.0)
+    assert regular.festivals_attended == 2
+
+
+def test_refunds_and_unnamed_sales_never_make_the_festival_list():
+    refund = _at(DURGA, 1, 3, 'Eli Test', 'Saree', -100.0, suburb='Springvale',
+                 quantity=-1)
+    unnamed = _rows(_at(DURGA, 1, 3, 'x'))
+    unnamed['name'] = [None]
+    rows = pd.concat([_rows(refund), unnamed])
+    assert build_festival_reminders(
+        rows, [DURGA], _past_frame(_past(DURGA)), TODAY) == ()
+
+
+def test_the_same_name_in_two_suburbs_shows_the_suburb_in_the_festival_list():
+    purchases = [_at(DURGA, 1, 3, 'Hal Test', 'Saree', 10.0, suburb=s)
+                 for s in ('Clayton', 'Dandenong')]
+    regulars = _festival_lists(purchases, [DURGA], _past_frame(_past(DURGA)))[0].regulars
+    assert sorted(r.suburb for r in regulars) == ['Clayton', 'Dandenong']
+
+
+def test_festival_lists_are_in_date_order():
+    soon, later = _festival('Durga Puja', 10), _festival('Diwali / Kali Puja', 30)
+    purchases = [_at(later, 1, 3, 'Asha Test'), _at(soon, 1, 3, 'Ben Test')]
+    past = _past_frame(_past(later), _past(soon))
+    lists = _festival_lists(purchases, [later, soon], past)
+    assert [l.festival for l in lists] == ['Durga Puja', 'Diwali / Kali Puja']
+
+
+def test_the_festival_text_names_the_festival_and_the_customers():
+    lists = _festival_lists([_at(DURGA, 1, 3, 'Asha Test')], [DURGA],
+                            _past_frame(_past(DURGA)))
+    text = render_reminders(build_reminders(_rows(), TODAY), TODAY, lists)
+    assert 'Durga Puja' in text and 'Asha Test' in text
+    assert 'last year' in text.lower()
+    assert text.count(PRIVACY_NOTE) == 1
+
+
+def test_the_festival_text_is_left_out_when_there_are_no_lists():
+    text = render_reminders(build_reminders(_rows(), TODAY), TODAY, ())
+    assert 'last year' not in text.lower()
+
+
+def test_the_festival_lists_are_written_to_the_file(tmp_path):
+    lists = _festival_lists([_at(DURGA, 1, 3, 'Asha Test')], [DURGA],
+                            _past_frame(_past(DURGA)))
+    path = write_reminders(build_reminders(_rows(), TODAY), tmp_path, TODAY, lists)
+    assert 'Asha Test' in path.read_text(encoding='utf-8')
 
 
 # --- reading the workbook ---------------------------------------------------

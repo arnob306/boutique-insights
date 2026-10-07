@@ -190,5 +190,12 @@ def test_the_dashboard_shows_the_reminder_count_only_when_there_is_one(built):
     assert '7 repeat customers are due a nudge' in page
 
 
+def test_the_dashboard_shows_festival_reminder_counts(built):
+    _, report, series = built
+    page = render_dashboard(replace(
+        report, reminder_count=2, festival_reminder_counts=(('Durga Puja', 9),)), series)
+    assert '9 customers bought at Durga Puja last year' in page
+
+
 def test_the_dashboard_has_no_playbook_section_without_a_calendar(page):
     assert 'Festival playbook' not in page

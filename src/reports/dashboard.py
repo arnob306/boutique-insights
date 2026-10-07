@@ -24,6 +24,7 @@ from src.reports.weekly import (
     ReorderLine,
     WeeklyReport,
     money,
+    festival_reminder_line,
     money_bullet,
     reminder_text,
 )
@@ -305,7 +306,9 @@ def _playbook(r: WeeklyReport) -> str:
 def _reminders(r: WeeklyReport) -> str:
     if r.reminder_count is None:
         return ''
-    return f'<p>{_esc(reminder_text(r.reminder_count))}</p>'
+    festivals = _list(festival_reminder_line(f, n)
+                      for f, n in r.festival_reminder_counts)
+    return f'<p>{_esc(reminder_text(r.reminder_count))}</p>{festivals}'
 
 
 def _section(title: str, body: str) -> str:

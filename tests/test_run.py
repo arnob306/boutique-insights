@@ -11,7 +11,15 @@ from src.decisions.store import (
     list_recommendations,
     open_log,
 )
-from src.reminders import PRIVACY_NOTE, build_reminders, load_customer_rows
+from src.adapters.boutique_xlsx import load_workbook_data
+from src.metrics.calendar import DEFAULT_CALENDAR_PATH, load_calendar
+from src.metrics.patterns import festival_windows
+from src.reminders import (
+    PRIVACY_NOTE,
+    build_festival_reminders,
+    build_reminders,
+    load_customer_rows,
+)
 from src.reports.delivery import DeliveryError
 from src.run import main
 
@@ -347,6 +355,34 @@ def test_the_report_count_matches_the_list(
     report = next((private_root / 'output').glob('weekly_*.txt')).read_text(
         encoding='utf-8')
     assert f'{expected.due_count} repeat customer' in report
+
+
+def _expected_festival_lists(workbook_path):
+    sales = load_workbook_data(workbook_path, salt=SALT).sales
+    return build_festival_reminders(
+        load_customer_rows(workbook_path), load_calendar(DEFAULT_CALENDAR_PATH),
+        festival_windows(sales), pd.Timestamp(TODAY))
+
+
+def test_the_local_file_lists_last_years_festival_buyers(
+        private_root, inbox_file, with_salt, workbook_path):
+    expected = _expected_festival_lists(workbook_path)
+    assert expected  # Durga Puja is days away and the synthetic data has history
+    assert _private(private_root, '--reminders') == 0
+    text = _reminder_file(private_root).read_text(encoding='utf-8')
+    assert expected[0].festival in text and 'last year' in text
+    assert expected[0].regulars[0].name in text
+
+
+def test_the_report_gets_a_festival_count_but_no_names(
+        private_root, inbox_file, with_salt, workbook_path):
+    expected = _expected_festival_lists(workbook_path)
+    assert _private(private_root, '--reminders') == 0
+    report = next((private_root / 'output').glob('weekly_*.txt')).read_text(
+        encoding='utf-8')
+    assert (f'{expected[0].count} customer' in report
+            and f'bought at {expected[0].festival} last year' in report)
+    assert expected[0].regulars[0].name not in report
 
 
 def test_reminders_are_refused_for_the_synthetic_profile(

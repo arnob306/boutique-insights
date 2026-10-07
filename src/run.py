@@ -23,7 +23,7 @@ import sys
 import zipfile
 from dataclasses import replace
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import NamedTuple, Optional, Tuple
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -33,9 +33,17 @@ from src.decisions.evaluate import evaluate_log
 from src.decisions.record import record_week
 from src.decisions.store import DecisionLogError
 from src.metrics.calendar import DEFAULT_CALENDAR_PATH, load_calendar
+from src.metrics.patterns import festival_windows
 from src.metrics.trends import weekly_series
 from src.privacy import PrivacyError, get_salt
-from src.reminders import Reminders, build_reminders, load_customer_rows, write_reminders
+from src.reminders import (
+    FestivalList,
+    Reminders,
+    build_festival_reminders,
+    build_reminders,
+    load_customer_rows,
+    write_reminders,
+)
 from src.reports.dashboard import WEEKS_SHOWN, render_dashboard
 from src.reports.delivery import (
     DeliveryError,
@@ -173,7 +181,15 @@ def _load(workbook: Path, salt: str):
             f'{workbook.name} could not be opened as an Excel workbook.') from None
 
 
-def _load_reminders(args, workbook: Path, today: pd.Timestamp) -> Optional[Reminders]:
+class ReminderPack(NamedTuple):
+    """Both reminder lists; they hold names and so never leave this module's
+    caller except as counts."""
+    gap: Reminders
+    festivals: Tuple[FestivalList, ...]
+
+
+def _load_reminders(args, workbook: Path, today: pd.Timestamp,
+                    sales: pd.DataFrame) -> Optional[ReminderPack]:
     """Who is due a nudge, read straight from the workbook (names stay here)."""
     if not args.reminders:
         return None
@@ -184,13 +200,24 @@ def _load_reminders(args, workbook: Path, today: pd.Timestamp) -> Optional[Remin
     except (zipfile.BadZipFile, OSError, ValueError):
         raise InputError(
             f'{workbook.name} could not be read for the reminders list.') from None
-    return build_reminders(rows, today)
+    festivals = build_festival_reminders(
+        rows, _calendar(), festival_windows(sales), today)
+    return ReminderPack(build_reminders(rows, today), festivals)
 
 
-def _write_reminders(args, reminders: Optional[Reminders], today: pd.Timestamp) -> None:
-    if reminders is None:
+def _with_reminder_counts(report, pack: Optional[ReminderPack]):
+    """The report with how many customers are listed, never who."""
+    if pack is None or not report.trusted:
+        return report
+    return replace(
+        report, reminder_count=pack.gap.due_count,
+        festival_reminder_counts=tuple((f.festival, f.count) for f in pack.festivals))
+
+
+def _write_reminders(args, pack: Optional[ReminderPack], today: pd.Timestamp) -> None:
+    if pack is None:
         return
-    path = write_reminders(reminders, args.private_root / 'output', today)
+    path = write_reminders(pack.gap, args.private_root / 'output', today, pack.festivals)
     _say(f'Reminders list written to {path} (it has customer names: keep it local).')
 
 
@@ -267,7 +294,7 @@ def main(argv=None, *, sender=send_email, env_file: Optional[str] = '.env') -> i
     try:
         workbook = _find_workbook(args)
         data = _load(workbook, _salt_for(args.profile))
-        reminders = _load_reminders(args, workbook, today)
+        reminders = _load_reminders(args, workbook, today, data.sales)
     except (InputError, PrivacyError) as exc:
         _say(f'Cannot run: {exc}')
         return EXIT_INPUT
@@ -278,8 +305,7 @@ def main(argv=None, *, sender=send_email, env_file: Optional[str] = '.env') -> i
         return EXIT_OK
 
     report = _build_report(data, today)
-    if report.trusted and reminders is not None:
-        report = replace(report, reminder_count=reminders.due_count)
+    report = _with_reminder_counts(report, reminders)
     _write_all(args, report, data.sales)
 
     if not report.trusted:
