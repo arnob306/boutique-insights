@@ -170,6 +170,35 @@ def test_no_festival_counts_adds_no_festival_lines(built):
     assert 'bought at' not in render_text(report)
 
 
+def _report_with_festival(workbook_path, days_ahead=70):
+    probe = load_workbook_data(workbook_path, salt=SALT)
+    start = probe.sales['date'].max() + days_ahead * DAY
+    calendar = [FestivalWindow('Durga Puja', start, start + 10 * DAY)]
+    return _build(workbook_path, calendar=calendar)[1]
+
+
+def test_the_playbook_carries_a_cash_plan_with_a_range(workbook_path):
+    report = _report_with_festival(workbook_path)
+    cash = report.playbook[0].cash
+    assert cash is not None and cash.low is not None
+    assert cash.low <= cash.expected <= cash.high
+    text = render_text(report)
+    assert 'Expected sales in the window' in text and 'stock budget' in text.lower()
+
+
+def test_the_stock_budget_uses_her_overall_cost_share(workbook_path):
+    report = _report_with_festival(workbook_path)
+    cash = report.playbook[0].cash
+    assert cash.budget_expected == pytest.approx(
+        cash.expected * (1 - report.overall_margin))
+
+
+def test_no_cash_plan_once_it_is_too_late_to_order(workbook_path):
+    report = _report_with_festival(workbook_path, days_ahead=10)
+    assert report.playbook[0].cash is None
+    assert 'Expected sales' not in render_text(report)
+
+
 def test_playbook_is_in_the_text_and_html_email_with_its_footer(workbook_path):
     probe = load_workbook_data(workbook_path, salt=SALT)
     start = probe.sales['date'].max() + 40 * DAY

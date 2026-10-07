@@ -9,9 +9,12 @@ uplift, so it is a planning guide, not financial advice.
 """
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 import pandas as pd
+
+from src.metrics.cashplan import CashPlan
+from src.reports.formatting import money
 
 HORIZON_DAYS = 120
 DEFAULT_LEAD_WEEKS = 6  # assumed until she fills the Stock & Orders sheet
@@ -21,6 +24,7 @@ CLEARANCE_DAYS = 14
 MIN_UPLIFT = 1.5
 MAX_LIFTS = 2
 SOLID_WINDOWS = 4  # past festivals needed to call a lift "solid"
+CASH_STAGES = ('later', 'order_soon', 'order_now')  # while there is time to order
 DAYS_PER_WEEK = 7
 
 PLAYBOOK_FOOTER = (
@@ -48,6 +52,7 @@ class PlaybookItem:
     lead_assumed: bool
     lifts: Tuple[Lift, ...]
     text: str
+    cash: Optional[CashPlan] = None
 
 
 def lead_weeks_from_stock(stock: Optional[pd.DataFrame]) -> Tuple[int, bool]:
@@ -116,24 +121,46 @@ def _advice(stage: str, order_by: pd.Timestamp, lead: str) -> str:
     return 'Just finished. Sell down leftover stock over the next two weeks.'
 
 
-def _item(window, uplift, today, lead_weeks, assumed) -> Optional[PlaybookItem]:
+def _cash_text(plan: CashPlan) -> str:
+    text = f' Expected sales in the window: about {money(plan.expected)}'
+    if plan.low is not None and plan.high is not None:
+        text += (f' (likely {money(plan.low)} to {money(plan.high)}, from '
+                 f'{plan.backtest_windows} past festivals).')
+    else:
+        text += ' (not enough history for a range).'
+    if plan.budget_expected is None:
+        return text
+    if plan.budget_low is None:
+        return text + f' A stock budget at that level is about {money(plan.budget_expected)}.'
+    return text + (f' A cautious stock budget is about {money(plan.budget_low)} '
+                   f'to {money(plan.budget_expected)}.')
+
+
+def _item(window, uplift, today, lead_weeks, assumed, cash_for) -> Optional[PlaybookItem]:
     order_by = window.start - pd.Timedelta(days=lead_weeks * DAYS_PER_WEEK)
     stage = _stage(window, today, order_by)
     if stage is None:
         return None
     lifts = _lifts(uplift, window.name)
     lead = _lead_text(lead_weeks, assumed)
+    cash = cash_for(window) if cash_for and stage in CASH_STAGES else None
     text = (f'{window.name} ({window.start:%d %b} to {window.end:%d %b}): '
             f'{_advice(stage, order_by, lead)}'
-            f'{_lift_text(window.name, lifts, uplift)}')
+            f'{_lift_text(window.name, lifts, uplift)}'
+            f'{_cash_text(cash) if cash else ""}')
     return PlaybookItem(window.name, window.start, window.end, stage, order_by,
-                        lead_weeks, assumed, lifts, text)
+                        lead_weeks, assumed, lifts, text, cash)
 
 
 def build_playbook(calendar, uplift: pd.DataFrame, today, lead_weeks: int,
-                   lead_assumed: bool) -> Tuple[PlaybookItem, ...]:
-    """One item per festival that is coming up, on now, or just finished."""
+                   lead_assumed: bool,
+                   cash_for: Optional[Callable] = None) -> Tuple[PlaybookItem, ...]:
+    """One item per festival that is coming up, on now, or just finished.
+
+    ``cash_for(window)`` gives the window's CashPlan (or None); it is asked
+    only while there is still time to place an order.
+    """
     today = pd.Timestamp(today).normalize()
-    items = (_item(w, uplift, today, lead_weeks, lead_assumed)
+    items = (_item(w, uplift, today, lead_weeks, lead_assumed, cash_for)
              for w in sorted(calendar, key=lambda w: w.start))
     return tuple(item for item in items if item is not None)

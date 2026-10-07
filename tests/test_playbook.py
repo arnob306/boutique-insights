@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 
 from src.metrics.calendar import FestivalWindow
+from src.metrics.cashplan import CashPlan
 from src.reports.playbook import (
     DEFAULT_LEAD_WEEKS,
     HORIZON_DAYS,
@@ -171,6 +172,73 @@ def test_clearance_says_to_sell_down_leftover_stock():
 def test_the_footer_says_this_is_not_financial_advice():
     assert 'not financial advice' in PLAYBOOK_FOOTER
     assert 'estimate' in PLAYBOOK_FOOTER.lower()
+
+
+# --- cash plan ---------------------------------------------------------------
+
+def _cash(expected=12300.0, low=7600.0, high=30100.0, **kw):
+    fields = dict(festival='Durga Puja', expected=expected, low=low, high=high,
+                  lift_windows=5, backtest_windows=47, budget_low=low * 0.6 if low else None,
+                  budget_expected=expected * 0.6)
+    fields.update(kw)
+    return CashPlan(**fields)
+
+
+def _with_cash(plan, starts_in=70):
+    seen = []
+
+    def cash_for(window):
+        seen.append(window.name)
+        return plan
+    items = build_playbook([_window(starts_in=starts_in)], _uplift(), TODAY, 6, False,
+                           cash_for=cash_for)
+    return items[0], seen
+
+
+def test_the_cash_plan_gives_expected_sales_a_range_and_a_budget():
+    item, _ = _with_cash(_cash())
+    assert item.cash == _cash()
+    assert 'about $12,300' in item.text
+    assert '$7,600 to $30,100' in item.text
+    assert '47 past festivals' in item.text
+    assert 'stock budget' in item.text.lower()
+    assert '$4,560 to $7,380' in item.text
+
+
+@pytest.mark.parametrize('starts_in', [30, 52, 70])
+def test_the_cash_plan_shows_while_there_is_still_time_to_order(starts_in):
+    assert 'Expected sales' in _with_cash(_cash(), starts_in)[0].text
+
+
+@pytest.mark.parametrize('starts_in, stage', [(10, 'preview'), (-3, 'on_now'),
+                                              (-20, 'clearance')])
+def test_the_cash_plan_is_left_out_once_it_is_too_late_to_order(starts_in, stage):
+    item, seen = _with_cash(_cash(), starts_in)
+    assert item.stage == stage and 'Expected sales' not in item.text
+    assert item.cash is None and seen == []  # not even computed
+
+
+def test_without_a_range_the_text_says_there_is_not_enough_history():
+    item, _ = _with_cash(_cash(low=None, high=None, backtest_windows=3,
+                               budget_low=None))
+    assert 'not enough history for a range' in item.text
+    assert 'about $12,300' in item.text
+    assert 'about $7,380' in item.text  # budget at the expected level only
+
+
+def test_without_a_cost_share_there_is_no_budget_text():
+    item, _ = _with_cash(_cash(budget_low=None, budget_expected=None))
+    assert 'Expected sales' in item.text and 'budget' not in item.text.lower()
+
+
+def test_no_cash_plan_leaves_the_item_as_before():
+    item, _ = _with_cash(None)
+    assert item.cash is None and 'Expected sales' not in item.text
+
+
+def test_no_cash_function_means_no_cash_text():
+    item = _one(windows=[_window()])
+    assert item.cash is None and 'Expected sales' not in item.text
 
 
 # --- lead time from the stock sheet ----------------------------------------

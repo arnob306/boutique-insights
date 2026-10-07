@@ -13,9 +13,11 @@ from typing import Optional, Tuple
 import pandas as pd
 
 from src.adapters.boutique_xlsx import WorkbookData
+from src.metrics.cashplan import build_cash_plan
 from src.metrics.patterns import festival_uplift
 from src.metrics.products import product_performance
 from src.metrics.reorder import reorder_suggestions
+from src.reports.formatting import money
 from src.reports.playbook import (
     PLAYBOOK_FOOTER,
     PlaybookItem,
@@ -24,7 +26,6 @@ from src.reports.playbook import (
 )
 from src.validation.report import ImportReport
 
-CURRENCY = '$'
 WEEK_DAYS = 7
 USUAL_WEEKS = 8
 YEAR_SHIFT_DAYS = 364  # same weekday one year earlier
@@ -131,9 +132,14 @@ def _reorder_lines(data, as_of, calendar, uplift):
     return lines, ('orders' if lines else 'nothing')
 
 
-def _playbook(data, calendar, uplift, today) -> Tuple[PlaybookItem, ...]:
+def _playbook(data, calendar, uplift, today, margin) -> Tuple[PlaybookItem, ...]:
     lead_weeks, assumed = lead_weeks_from_stock(data.stock)
-    return build_playbook(calendar, uplift, today, lead_weeks, assumed)
+    cost_share = None if margin is None else 1 - margin
+
+    def cash_for(window):
+        return build_cash_plan(data.sales, window, today, lead_weeks, cost_share)
+
+    return build_playbook(calendar, uplift, today, lead_weeks, assumed, cash_for)
 
 
 def _money_line(row) -> MoneyLine:
@@ -181,18 +187,13 @@ def build_weekly_report(
         data_through=data_through, week_start=week_start, week_end=data_through,
         **_weekly_totals(sales, week_start, data_through),
         reorder=reorder, reorder_status=status,
-        playbook=_playbook(data, calendar, uplift, today),
+        playbook=_playbook(data, calendar, uplift, today, margin),
         top_earners=top, small_earners=small, overall_margin=margin,
         data_notes=notes, trusted=import_report.ok,
     )
 
 
 # --- wording ---------------------------------------------------------------
-
-def money(value: float) -> str:
-    sign = '-' if value < 0 else ''
-    return f'{sign}{CURRENCY}{abs(value):,.0f}'
-
 
 def _compare(now: float, before: float, label: str) -> str:
     gap = now - before
