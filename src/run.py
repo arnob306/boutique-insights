@@ -7,6 +7,9 @@ Usage:
     python -m src.run --profile private --send       # ...and email the report
     python -m src.run --profile private --reminders  # ...and list customers due a nudge
 
+--reminders --holdout 0.2 also holds 20% of each festival's list back on purpose,
+to test fairly whether reminders work (off by default; agree it with the owner).
+
 --reminders writes a local file with real customer names to data/private/output/.
 The email and dashboard only ever say how many are due.
 
@@ -30,8 +33,11 @@ from dotenv import load_dotenv
 
 from src.adapters.boutique_xlsx import SchemaError, load_workbook_data
 from src.decisions.evaluate import evaluate_log
+from src.decisions.experiments import track_experiments
+from src.decisions.festival import track_festival_forecasts
 from src.decisions.record import record_week
 from src.decisions.store import DecisionLogError
+from src.holdout import Holdout
 from src.metrics.calendar import DEFAULT_CALENDAR_PATH, load_calendar
 from src.metrics.patterns import festival_windows
 from src.metrics.trends import weekly_series
@@ -100,6 +106,11 @@ def _parse_args(argv) -> argparse.Namespace:
     parser.add_argument('--reminders', action='store_true',
                         help='also list repeat customers due a nudge, with their '
                              'names, in a local file (private profile only)')
+    parser.add_argument('--holdout', type=float, metavar='SHARE',
+                        help='with --reminders: hold this share (for example 0.2) of '
+                             "each festival's list back on purpose, to test fairly "
+                             'whether reminders work. Off by default; agree it with '
+                             'the shop owner first')
     parser.add_argument('--today', help='override today (YYYY-MM-DD)')
     parser.add_argument('--stock-template', type=Path, metavar='PATH',
                         help='write a blank Stock & Orders sheet and stop')
@@ -188,8 +199,19 @@ class ReminderPack(NamedTuple):
     festivals: Tuple[FestivalList, ...]
 
 
+def _holdout(args) -> Optional[Holdout]:
+    """The holdout settings, or None when it was not asked for."""
+    if args.holdout is None:
+        return None
+    try:
+        return Holdout(args.holdout, _salt_for(args.profile))
+    except ValueError as exc:
+        raise InputError(str(exc)) from None
+
+
 def _load_reminders(args, workbook: Path, today: pd.Timestamp,
-                    sales: pd.DataFrame) -> Optional[ReminderPack]:
+                    sales: pd.DataFrame, holdout: Optional[Holdout]
+                    ) -> Optional[ReminderPack]:
     """Who is due a nudge, read straight from the workbook (names stay here)."""
     if not args.reminders:
         return None
@@ -201,7 +223,7 @@ def _load_reminders(args, workbook: Path, today: pd.Timestamp,
         raise InputError(
             f'{workbook.name} could not be read for the reminders list.') from None
     festivals = build_festival_reminders(
-        rows, _calendar(), festival_windows(sales), today)
+        rows, _calendar(), festival_windows(sales), today, holdout=holdout)
     return ReminderPack(build_reminders(rows, today), festivals)
 
 
@@ -211,7 +233,8 @@ def _with_reminder_counts(report, pack: Optional[ReminderPack]):
         return report
     return replace(
         report, reminder_count=pack.gap.due_count,
-        festival_reminder_counts=tuple((f.festival, f.count) for f in pack.festivals))
+        festival_reminder_counts=tuple(
+            (f.festival, f.count) for f in pack.festivals if f.count > 0))
 
 
 def _write_reminders(args, pack: Optional[ReminderPack], today: pd.Timestamp) -> None:
@@ -249,7 +272,18 @@ def _decision_log_path(args) -> Optional[Path]:
     return None
 
 
-def _record_decisions(args, data, today: pd.Timestamp) -> None:
+def _track_holdout(args, path: Path, pack: Optional[ReminderPack], data,
+                   today: pd.Timestamp) -> None:
+    """Log this run's holdout lists and score finished ones (counts only)."""
+    lists = pack.festivals if pack else ()
+    recorded, scored = track_experiments(
+        path, lists, args.holdout, data.sales, _salt_for(args.profile), today.date())
+    if args.holdout is not None or scored:
+        _say(f'Holdout test: {recorded} festival(s) recorded, {scored} scored.')
+
+
+def _record_decisions(args, data, report, today: pd.Timestamp,
+                      pack: Optional[ReminderPack]) -> None:
     """Score old recommendations and log this week's; a log problem never
     stops the report."""
     path = _decision_log_path(args)
@@ -258,11 +292,15 @@ def _record_decisions(args, data, today: pd.Timestamp) -> None:
     try:
         scored = evaluate_log(data.sales, path, today.date())
         added = record_week(data, path, calendar=_calendar())
+        forecasts = track_festival_forecasts(
+            path, report.playbook, data.sales, today.date())
+        _track_holdout(args, path, pack, data, today)
     except DecisionLogError as exc:
         _say(f'Decision log not updated: {exc}')
         return
     _say(f'Decision log: {added} new recommendation(s) recorded, '
          f'{scored} outcome(s) scored.')
+    _say(f'Festival forecasts: {forecasts[0]} recorded, {forecasts[1]} scored.')
 
 
 def _write_all(args, report, sales) -> None:
@@ -289,12 +327,16 @@ def main(argv=None, *, sender=send_email, env_file: Optional[str] = '.env') -> i
         _say('Cannot run: --reminders lists real customer names, so it only '
              'works with --profile private.')
         return EXIT_INPUT
+    if args.holdout is not None and not args.reminders:
+        _say('Cannot run: --holdout holds back part of the reminders list, so it '
+             'needs --reminders.')
+        return EXIT_INPUT
     today = pd.Timestamp(args.today or pd.Timestamp.today()).normalize()
 
     try:
         workbook = _find_workbook(args)
         data = _load(workbook, _salt_for(args.profile))
-        reminders = _load_reminders(args, workbook, today, data.sales)
+        reminders = _load_reminders(args, workbook, today, data.sales, _holdout(args))
     except (InputError, PrivacyError) as exc:
         _say(f'Cannot run: {exc}')
         return EXIT_INPUT
@@ -311,7 +353,7 @@ def main(argv=None, *, sender=send_email, env_file: Optional[str] = '.env') -> i
     if not report.trusted:
         _say('The data has problems, so the report was not emailed or archived.')
         return EXIT_UNTRUSTED
-    _record_decisions(args, data, today)
+    _record_decisions(args, data, report, today, reminders)
     _write_reminders(args, reminders, today)
     if args.send:
         try:

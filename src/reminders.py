@@ -21,6 +21,8 @@ from typing import Optional, Tuple
 import pandas as pd
 
 from src.adapters.boutique_xlsx import SALES_SHEET, SchemaError
+from src.holdout import HOLD, RECENT_BUYER_DAYS, Holdout
+from src.privacy import hash_customer
 from src.reports.weekly import money
 
 MIN_GAP_DAYS = 30  # so someone who bought last week is not nudged again
@@ -29,7 +31,6 @@ DUE_WINDOW_DAYS = 28  # how long after their due date a customer stays on the li
 MAX_LINES = 15
 MIN_PURCHASE_DAYS = 2
 FESTIVAL_LIST_DAYS = 35  # list last year's festival buyers this far ahead
-RECENT_BUYER_DAYS = 28  # someone who just shopped is left out
 MATCH_TOLERANCE_DAYS = 60  # how far from "a year ago" a past window may start
 YEAR_DAYS = 364  # 52 weeks, so weekdays line up
 
@@ -84,7 +85,8 @@ class FestivalList:
     last_start: pd.Timestamp  # the window last year that the list comes from
     last_end: pd.Timestamp
     regulars: Tuple[FestivalRegular, ...]
-    count: int  # everyone who qualifies, including those beyond the list cap
+    count: int  # everyone to contact, including those beyond the list cap
+    held_back: int = 0  # eligible but deliberately not listed (the holdout test)
 
 
 def load_customer_rows(path) -> pd.DataFrame:
@@ -198,10 +200,27 @@ def _bought_in(buys: pd.DataFrame, start, end) -> pd.DataFrame:
                 & (buys['day'] <= pd.Timestamp(end).normalize())]
 
 
-def _festival_regulars(window_buys, attended: Counter, skip: set) -> list:
+def _is_held_back(key: tuple, window, holdout: Optional[Holdout]) -> bool:
+    """Whether the holdout test leaves this customer off the list.
+
+    The key is built from named rows, so it always hashes to an id.
+    """
+    if holdout is None:
+        return False
+    customer_id = hash_customer(key[0], key[1], holdout.salt) or ''
+    return holdout.arm(customer_id, window.name, window.start.year) == HOLD
+
+
+def _festival_regulars(window_buys, attended: Counter, skip: set, window,
+                       holdout: Optional[Holdout]) -> Tuple[list, int]:
+    """(who to contact, how many eligible customers were held back)."""
     regulars = []
+    held_back = 0
     for key, group in window_buys.groupby(['name_key', 'suburb_key']):
         if key in skip:
+            continue
+        if _is_held_back(key, window, holdout):
+            held_back += 1
             continue
         regulars.append(FestivalRegular(
             name=_commonest_name(group['name']), suburb=_commonest(group['suburb']),
@@ -210,10 +229,11 @@ def _festival_regulars(window_buys, attended: Counter, skip: set) -> list:
     shared = Counter(_key(r.name) for r in regulars)
     regulars = [replace(r, suburb=r.suburb if shared[_key(r.name)] > 1 else None)
                 for r in regulars]
-    return sorted(regulars, key=lambda r: (-r.spend, r.name))
+    return sorted(regulars, key=lambda r: (-r.spend, r.name)), held_back
 
 
-def _festival_list(window, last, buys, past_windows, today) -> Optional[FestivalList]:
+def _festival_list(window, last, buys, past_windows, today,
+                   holdout: Optional[Holdout]) -> Optional[FestivalList]:
     recent = _bought_in(buys, today - pd.Timedelta(days=RECENT_BUYER_DAYS), today)
     skip = set(zip(recent['name_key'], recent['suburb_key'], strict=True))
     attended: Counter[tuple[str, str]] = Counter()
@@ -221,18 +241,24 @@ def _festival_list(window, last, buys, past_windows, today) -> Optional[Festival
                                 & (past_windows['end'] < window.start)].iterrows():
         seen = _bought_in(buys, past['start'], past['end'])
         attended.update(set(zip(seen['name_key'], seen['suburb_key'], strict=True)))
-    regulars = _festival_regulars(_bought_in(buys, last['start'], last['end']),
-                                  attended, skip)
-    if not regulars:
+    regulars, held_back = _festival_regulars(
+        _bought_in(buys, last['start'], last['end']), attended, skip, window, holdout)
+    if not regulars and not held_back:
         return None
     return FestivalList(window.name, window.start, window.end, last['start'],
-                        last['end'], tuple(regulars[:MAX_LINES]), len(regulars))
+                        last['end'], tuple(regulars[:MAX_LINES]), len(regulars),
+                        held_back)
 
 
 def build_festival_reminders(rows: pd.DataFrame, calendar, past_windows: pd.DataFrame,
-                             today) -> Tuple[FestivalList, ...]:
+                             today, holdout: Optional[Holdout] = None
+                             ) -> Tuple[FestivalList, ...]:
     """For each festival starting soon, who bought in the same window last year
-    and has not shopped lately. Soonest festival first."""
+    and has not shopped lately. Soonest festival first.
+
+    With a ``holdout``, a share of those customers is left off the list on
+    purpose (see ``src/holdout.py``) and only counted.
+    """
     today = pd.Timestamp(today).normalize()
     buys = _named_purchases(rows)
     lists = []
@@ -242,7 +268,7 @@ def build_festival_reminders(rows: pd.DataFrame, calendar, past_windows: pd.Data
         last = _last_year_window(window, past_windows)
         if last is None:
             continue
-        found = _festival_list(window, last, buys, past_windows, today)
+        found = _festival_list(window, last, buys, past_windows, today, holdout)
         if found is not None:
             lists.append(found)
     return tuple(lists)
@@ -273,12 +299,19 @@ def _regular_text(r: FestivalRegular) -> str:
 
 def _festival_block(item: FestivalList) -> list:
     noun = 'customer' if item.count == 1 else 'customers'
-    head = (f'{item.festival} starts {item.start:%d %b}. {item.count} {noun} bought in '
-            f'the same window last year ({item.last_start:%d %b} to '
-            f'{item.last_end:%d %b %Y}) and have not shopped lately')
+    if item.count == 0:
+        head = f'{item.festival} starts {item.start:%d %b}. Nobody to contact this time'
+    else:
+        head = (f'{item.festival} starts {item.start:%d %b}. {item.count} {noun} bought in '
+                f'the same window last year ({item.last_start:%d %b} to '
+                f'{item.last_end:%d %b %Y}) and have not shopped lately')
     if item.count > len(item.regulars):
         head += f' (the {len(item.regulars)} who spent most are listed)'
-    return [head + '.', ''] + [f'- {_regular_text(r)}' for r in item.regulars] + ['']
+    lines = [head + '.']
+    if item.held_back:
+        lines.append(f'{item.held_back} held back on purpose, to see fairly whether '
+                     'reminders work (not listed).')
+    return lines + [''] + [f'- {_regular_text(r)}' for r in item.regulars] + ['']
 
 
 def _gap_section(result: Reminders) -> list:

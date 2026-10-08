@@ -15,7 +15,7 @@ from datetime import date
 from pathlib import Path
 from typing import Iterator, List, Optional, Sequence, cast
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_LOG_PATH = Path('data/private/decisions.sqlite')
 
 KINDS = ('reorder', 'forecast')
@@ -50,6 +50,52 @@ CREATE TABLE outcomes (
     forecast_error REAL NOT NULL,
     leftover_units INTEGER CHECK (leftover_units >= 0),
     stocked_out INTEGER CHECK (stocked_out IN (0, 1))
+);
+"""
+
+# Added in version 2: whether festival sales forecasts held, and the reminder
+# holdout. Counts only: no customer ids, names or free text.
+_SCHEMA_V2 = """
+CREATE TABLE festival_forecasts (
+    id INTEGER PRIMARY KEY,
+    festival TEXT NOT NULL,
+    window_start TEXT NOT NULL,
+    window_end TEXT NOT NULL,
+    recorded_on TEXT NOT NULL,
+    expected REAL NOT NULL CHECK (expected >= 0),
+    low REAL,
+    high REAL,
+    lift_windows INTEGER NOT NULL,
+    backtest_windows INTEGER NOT NULL,
+    UNIQUE (festival, window_start)
+);
+CREATE TABLE festival_outcomes (
+    forecast_id INTEGER PRIMARY KEY REFERENCES festival_forecasts (id),
+    evaluated_on TEXT NOT NULL,
+    actual REAL NOT NULL,
+    forecast_error REAL NOT NULL,
+    inside_range INTEGER CHECK (inside_range IN (0, 1))
+);
+CREATE TABLE experiments (
+    id INTEGER PRIMARY KEY,
+    festival TEXT NOT NULL,
+    window_start TEXT NOT NULL,
+    window_end TEXT NOT NULL,
+    listed_on TEXT NOT NULL,
+    last_start TEXT NOT NULL,
+    last_end TEXT NOT NULL,
+    holdout_share REAL NOT NULL CHECK (holdout_share > 0 AND holdout_share <= 0.5),
+    n_send INTEGER NOT NULL CHECK (n_send >= 0),
+    n_hold INTEGER NOT NULL CHECK (n_hold >= 0),
+    UNIQUE (festival, window_start)
+);
+CREATE TABLE experiment_outcomes (
+    experiment_id INTEGER PRIMARY KEY REFERENCES experiments (id),
+    evaluated_on TEXT NOT NULL,
+    n_send INTEGER NOT NULL CHECK (n_send >= 0),
+    n_hold INTEGER NOT NULL CHECK (n_hold >= 0),
+    bought_send INTEGER NOT NULL CHECK (bought_send >= 0),
+    bought_hold INTEGER NOT NULL CHECK (bought_hold >= 0)
 );
 """
 
@@ -129,14 +175,26 @@ def _prepare(conn: sqlite3.Connection) -> None:
     version = conn.execute('PRAGMA user_version').fetchone()[0]
     if version == SCHEMA_VERSION:
         return
+    if version == 1:
+        _upgrade_1_to_2(conn)
+        return
     has_tables = conn.execute(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'").fetchone()[0]
     if version != 0 or has_tables:
         raise DecisionLogError(
             f'The decision log has schema version {version}, but this code '
             f'understands version {SCHEMA_VERSION}. Not touching it.')
-    conn.executescript(_SCHEMA)
-    conn.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
+    conn.executescript(f'BEGIN;{_SCHEMA}{_SCHEMA_V2}'
+                       f'PRAGMA user_version = {SCHEMA_VERSION};COMMIT;')
+
+
+def _upgrade_1_to_2(conn: sqlite3.Connection) -> None:
+    """Add the version 2 tables in one transaction; existing rows are untouched.
+
+    If anything fails the transaction is rolled back by ``open_log``, leaving
+    the file at version 1.
+    """
+    conn.executescript(f'BEGIN;{_SCHEMA_V2}PRAGMA user_version = 2;COMMIT;')
 
 
 @contextmanager

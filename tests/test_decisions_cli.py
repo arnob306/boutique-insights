@@ -117,6 +117,72 @@ def test_summary_before_any_outcome_explains_why(log_path, capsys):
     assert 'no outcomes yet' in capsys.readouterr().out.lower()
 
 
+def _score_festival_forecasts(log_path, *rows):
+    """rows: (festival, expected, low, high, actual)"""
+    with open_log(log_path) as conn:
+        for i, (festival, expected, low, high, actual) in enumerate(rows, start=1):
+            conn.execute(
+                'INSERT INTO festival_forecasts (festival, window_start, window_end, '
+                'recorded_on, expected, low, high, lift_windows, backtest_windows) '
+                "VALUES (?, '2026-10-10', '2026-10-21', '2026-09-01', ?, ?, ?, 4, 12)",
+                (festival, expected, low, high))
+            conn.execute(
+                'INSERT INTO festival_outcomes (forecast_id, evaluated_on, actual, '
+                'forecast_error, inside_range) VALUES (?, ?, ?, ?, ?)',
+                (i, '2026-11-01', actual, expected - actual,
+                 None if low is None else int(low <= actual <= high)))
+
+
+def test_summary_shows_festival_forecast_accuracy_and_range_coverage(log_path, capsys):
+    _score_festival_forecasts(
+        log_path,
+        ('Durga Puja', 1000.0, 600.0, 2000.0, 800.0),    # error +200, inside
+        ('Diwali', 1000.0, 600.0, 2000.0, 2500.0))       # error -1500, above
+    assert _run(log_path, 'summary') == 0
+    out = capsys.readouterr().out
+    assert 'no outcomes yet' not in out.lower()
+    assert 'Festival sales forecasts' in out
+    assert '2 scored' in out
+    assert '52%' in out                 # (200 + 1500) / 3300
+    assert 'range held in 1 of 2' in out
+
+
+def test_summary_says_when_no_festival_forecast_had_a_range(log_path, capsys):
+    _score_festival_forecasts(log_path, ('Durga Puja', 1000.0, None, None, 800.0))
+    assert _run(log_path, 'summary') == 0
+    assert 'no range to check' in capsys.readouterr().out.lower()
+
+
+def _score_experiment(log_path, n_send, bought_send, n_hold, bought_hold):
+    with open_log(log_path) as conn:
+        conn.execute(
+            'INSERT INTO experiments (festival, window_start, window_end, listed_on, '
+            "last_start, last_end, holdout_share, n_send, n_hold) VALUES ('Diwali', "
+            "'2026-10-10', '2026-10-21', '2026-09-20', '2025-10-11', '2025-10-22', "
+            '0.2, ?, ?)', (n_send, n_hold))
+        conn.execute('INSERT INTO experiment_outcomes VALUES (1, ?, ?, ?, ?, ?)',
+                     ('2026-11-01', n_send, n_hold, bought_send, bought_hold))
+
+
+def test_summary_reports_a_small_holdout_as_inconclusive(log_path, capsys):
+    _score_experiment(log_path, 20, 9, 8, 3)
+    assert _run(log_path, 'summary') == 0
+    out = capsys.readouterr().out
+    assert 'no outcomes yet' not in out.lower()
+    assert 'Reminder holdout' in out
+    assert '20 contacted' in out and '8 held back' in out
+    assert '45%' in out and '38%' in out
+    assert '95% interval' in out
+    assert 'smallest difference' in out.lower()
+    assert 'inconclusive' in out.lower()
+
+
+def test_summary_reports_a_clear_holdout_result(log_path, capsys):
+    _score_experiment(log_path, 400, 200, 100, 25)
+    assert _run(log_path, 'summary') == 0
+    assert 'positive' in capsys.readouterr().out.lower()
+
+
 def test_summary_shows_error_and_bias_per_model(log_path, capsys):
     with open_log(log_path) as conn:
         add_recommendations(conn, [make_rec(expected_demand=6.0)])

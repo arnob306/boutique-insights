@@ -130,7 +130,8 @@ and the full tables are in [docs/decisions.md](docs/decisions.md).
 - **Customers.** 40% of 2,325 known customers repeat and bring in 71% of revenue,
   which is why the reminder lists exist.
 - **Not yet measured:** whether following the advice changed sales or saved
-  time. That needs the outcome tracking in the roadmap.
+  time. The outcome tracking that will measure it (forecast coverage and the
+  reminder holdout) is built, but needs festivals to pass first.
 
 ## Project layout
 
@@ -143,6 +144,7 @@ src/
   decisions/    SQLite decision log: recommendations, actions, outcomes
   reports/      weekly summary, dashboard, festival playbook, email delivery
   reminders.py  customers to contact (the only code that reads names)
+  holdout.py    reminder holdout: groups, eligibility, comparison
   synthetic/    generator for the demo workbook
   privacy.py    customer hashing
   run.py        command-line entry point
@@ -172,9 +174,13 @@ the tests on Python 3.11 and 3.13.
 - **Done:** import, validation, metrics, weekly summary, email, dashboard,
   decision log, forecast comparison, festival playbook with cash plan,
   customer reminders, mix and channel review.
-- **Next:** measure real outcomes. Record each festival forecast and check
-  whether its range held, and test whether the festival reminders bring
-  customers back, with a small holdout group agreed with the shop's owner.
+- **Done (outcome tracking):** each festival forecast is logged and checked
+  against what sold, and an optional reminder holdout (`--reminders --holdout
+  0.2`, off by default, agreed with the shop's owner first) compares customers
+  who were contacted with a small held-back group. See `python -m
+  src.decisions summary` and [docs/decisions.md](docs/decisions.md).
+- **Next:** let a few festivals pass. The first results will probably be
+  inconclusive, and the summary says so.
 - **Optional, later:** a plain-English question layer that answers from the
   existing metric functions, only if it never sends customer data to a third
   party.

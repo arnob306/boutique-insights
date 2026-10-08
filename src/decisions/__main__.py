@@ -13,9 +13,11 @@ import sys
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
-from typing import Callable
+from typing import Callable, List, Optional
 
 from src.decisions.evaluate import summarise
+from src.decisions.experiments import pooled_comparison
+from src.decisions.festival import FestivalAccuracy, festival_accuracy
 from src.decisions.store import (
     ACTIONS,
     DEFAULT_LOG_PATH,
@@ -25,6 +27,7 @@ from src.decisions.store import (
     latest_recommendation_id,
     open_log,
 )
+from src.holdout import Comparison
 
 EXIT_OK = 0
 EXIT_INPUT = 2
@@ -81,18 +84,57 @@ def _summary(args) -> int:
         return EXIT_OK
     try:
         with open_log(args.log) as conn:
-            rows = summarise(conn)
+            lines = _summary_lines(conn)
     except DecisionLogError as exc:
         _say(f'Cannot read the decision log: {exc}')
         return EXIT_INPUT
-    if not rows:
+    if not lines:
         _say('No outcomes yet: a recommendation is scored once its window has passed.')
         return EXIT_OK
-    for row in rows:
-        error = 'n/a' if row.wape is None else f'{row.wape:.0%}'
-        _say(f'{row.model:<14}{row.kind:<10}{row.n:>4} scored   '
-             f'error {error:>5}   bias {row.bias:+.1f} units')
+    for line in lines:
+        _say(line)
     return EXIT_OK
+
+
+def _summary_lines(conn) -> List[str]:
+    lines = []
+    for row in summarise(conn):
+        error = 'n/a' if row.wape is None else f'{row.wape:.0%}'
+        lines.append(f'{row.model:<14}{row.kind:<10}{row.n:>4} scored   '
+                     f'error {error:>5}   bias {row.bias:+.1f} units')
+    return (lines + _festival_lines(festival_accuracy(conn))
+            + _holdout_lines(pooled_comparison(conn)))
+
+
+def _points(value: float) -> str:
+    return f'{value * 100:+.0f}'
+
+
+def _holdout_lines(result: Optional[Comparison]) -> List[str]:
+    if result is None:
+        return []
+    lines = [f'Reminder holdout: {result.n_send} contacted, {result.n_hold} held back']
+    if (result.difference is None or result.low is None or result.high is None
+            or result.mde is None or result.rate_send is None
+            or result.rate_hold is None):
+        return [lines[0] + '. ' + result.reason]
+    lines[0] += (f'. Bought: {result.rate_send:.0%} of those contacted, '
+                 f'{result.rate_hold:.0%} of those held back.')
+    return lines + [
+        f'  Difference {_points(result.difference)} points '
+        f'(95% interval {_points(result.low)} to {_points(result.high)}). '
+        f'Smallest difference this sample could detect: {result.mde * 100:.0f} points.',
+        f'  Verdict: {result.verdict}. {result.reason}']
+
+
+def _festival_lines(accuracy: Optional[FestivalAccuracy]) -> List[str]:
+    if accuracy is None:
+        return []
+    error = 'n/a' if accuracy.wape is None else f'{accuracy.wape:.0%}'
+    bias = '' if accuracy.bias is None else f'   bias {accuracy.bias:+.0%}'
+    held = ('no range to check' if accuracy.ranged == 0 else
+            f'range held in {accuracy.inside} of {accuracy.ranged}')
+    return [f'Festival sales forecasts: {accuracy.n} scored   error {error}{bias}   {held}']
 
 
 def main(argv=None, *, today: Callable[[], date] = date.today) -> int:

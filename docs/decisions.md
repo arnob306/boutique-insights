@@ -78,20 +78,42 @@ figure without a range.
 and it is shown as a range for that reason. Lunar festival dates are estimates.
 It is planning support, not financial advice.
 
-## 4. Measure outcomes, starting with a reminder holdout (proposed)
+## 4. Measure outcomes: forecast coverage and a reminder holdout
 
 **Context.** Accuracy numbers say the forecasts are reasonable. They do not say
 that following the advice helped the shop.
 
-**Decision (proposed, not yet built).**
-- Record each festival forecast near its order-by date and, once the window
-  ends, whether the actual sales fell inside the range.
-- Optionally hold back about 20% of the festival reminder list, assigned by a
-  keyed hash so it is reproducible and needs no names, and compare repeat
-  purchases within 30 days. This is off by default and needs the owner's
-  agreement, because it means not contacting some customers on purpose.
+**Decision.**
+- Each festival's expected sales and range are logged once, while there is
+  still time to order (the first one is kept). When the window ends, the actual
+  net sales are written next to it, with whether they fell inside the range.
+  `python -m src.decisions summary` shows the error, bias and how often the
+  range held.
+- Optionally (`--reminders --holdout 0.2`, off by default, and only with the
+  owner's agreement, because it means not contacting some customers on
+  purpose) a share of each festival's eligible customers is left off the
+  reminders list. Groups come from a keyed hash of the pseudonymous customer
+  id plus festival and year, so they are reproducible and need no names. The
+  log stores counts only.
+- The two groups are compared as assigned (intention to treat): the share of
+  each group that bought from the day after the list to the end of the
+  festival. The result is pooled over festivals, with a 95% interval and the
+  smallest difference the sample could detect.
+
+**Two choices that differ from the first sketch.**
+- The outcome window runs to the end of the festival, not a fixed 30 days,
+  because lists go out up to 35 days ahead and most festival purchases would
+  fall after a 30-day window.
+- The interval is Newcombe's score interval, not a bootstrap from the counts:
+  a bootstrap from small counts collapses when a group's rate is 0% or 100%,
+  which is likely here. It is deterministic and was checked against the worked
+  example in Newcombe (1998).
 
 **Expected result.** The eligible groups are small (tens of customers per
-festival), so the first year will probably be inconclusive. The report should
-say so plainly, with a confidence interval and the smallest difference the
-sample could detect.
+festival), so the first year will probably be inconclusive. No verdict is given
+unless each group has at least 20 customers, and the summary says so plainly.
+
+**Consequences.** The log moved to schema version 2 with a non-destructive
+upgrade from version 1 (new tables only, tested on a version 1 log that holds
+data). Nothing here shows that the advice raised sales until enough festivals
+have been scored.
