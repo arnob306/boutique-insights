@@ -2,10 +2,21 @@
 
 A weekly sales report for a small Bengali clothing and jewellery boutique in
 Melbourne. It reads the shop's Excel sales workbook, checks the data, and
-produces a short plain-English summary that answers two questions:
+produces a short plain-English summary (email and a one-page dashboard) that
+answers five questions:
 
 1. **What should I reorder?**
 2. **Which products actually make money?**
+3. **What should I do about each upcoming festival?** An order-by date, which
+   categories usually sell faster, and expected sales for the festival with a
+   likely range and a stock budget.
+4. **Which customers should I contact?** Repeat customers due a nudge, and
+   last year's buyers before each festival, in a local file with real names.
+5. **Where does the money come from?** Category and channel mix, with margin.
+
+It also keeps a decision log (what was recommended, what happened) and has a
+forecast comparison used to check that the live rules are good enough.
+It is planning support, not financial advice.
 
 I built it for my mum's real business, so it has a real user. The first
 version of this project analysed a public UK retail dataset; that version is
@@ -18,8 +29,13 @@ The shop's real data is never in this repository.
 - Real files live in `data/private/`, which is gitignored. A test fails if
   anything under it is ever tracked by git.
 - Customer names are replaced with a keyed hash (HMAC-SHA256) inside the
-  importer and never reach reports, logs or outputs. Suburb and payment method
-  are dropped.
+  importer and never reach the email, the dashboard, the decision log or the
+  analysis code. Suburb and payment method are dropped there too.
+- One deliberate exception: `--reminders` writes a list of customers to
+  contact, with real names, to a text file under `data/private/output/` on the
+  owner's computer. It is read straight from the workbook by `src/reminders.py`
+  only, it is never emailed, and the email and dashboard show a count only.
+  Tests check that no name appears anywhere else.
 - The weekly report is built from plain arithmetic and templates. No LLM is
   involved, so no business data is sent to a third party.
 - The demo, tests and screenshots use a synthetic workbook with invented names
@@ -97,17 +113,40 @@ already on order.
   stock on hand and stock already on order. Products with few recent sales are
   marked as rough guesses.
 
+## Results
+
+Measured on the owner's real ledger (4,993 sales rows, 15 products, 2015 to
+2026), which is private, so these cannot be re-run from a clone. The reasoning
+and the full tables are in [docs/decisions.md](docs/decisions.md).
+
+- **Reorder forecast.** Over 1,588 rolling 4-week windows the live rule had 66.9%
+  error (WAPE), against 68.8% and 75.0% for two alternatives. It was already the
+  best of the three, so no heavier model was built.
+- **Festival sales forecast.** Across 47 past festival windows, forecast from
+  six weeks out, "recent daily sales x the festival's usual lift" had 37% error
+  and +7% bias, against 50% to 59% for three alternatives. The playbook shows it
+  as a range, because the 10th to 90th percentile of actual over forecast ran
+  from 0.62 to 2.45.
+- **Customers.** 40% of 2,325 known customers repeat and bring in 71% of revenue,
+  which is why the reminder lists exist.
+- **Not yet measured:** whether following the advice changed sales or saved
+  time. That needs the outcome tracking in the roadmap.
+
 ## Project layout
 
 ```
 src/
   adapters/     read the workbook into the standard schema
   validation/   import checks and the report of problems
-  metrics/      profit, velocity, festival patterns, reorder suggestions
-  reports/      weekly summary (text and HTML) and email delivery
+  metrics/      profit, velocity, festival patterns, reorder, cash plan, mix
+  forecast/     rolling-origin comparison of forecasting methods
+  decisions/    SQLite decision log: recommendations, actions, outcomes
+  reports/      weekly summary, dashboard, festival playbook, email delivery
+  reminders.py  customers to contact (the only code that reads names)
   synthetic/    generator for the demo workbook
   privacy.py    customer hashing
   run.py        command-line entry point
+docs/decisions.md       why the main design choices were made
 config/festivals.yaml   upcoming festival dates
 data/private/           real data (gitignored)
 data/synthetic/         demo workbook
@@ -118,18 +157,27 @@ tests/
 ## Tests
 
 ```bash
-pytest tests/ --cov=src
+python -m pytest tests/ --cov=src
+python -m ruff check src tests
+python -m mypy
 ```
 
 The suite uses only synthetic data and covers the adapter, validation,
-metrics, report, delivery, command line and the privacy guards.
+metrics, report, dashboard, delivery, decision log, forecast comparison,
+reminders, command line and the privacy guards. CI runs all three commands, with
+the tests on Python 3.11 and 3.13.
 
 ## Roadmap
 
-- **Phase 1 (done):** import, validation, metrics, weekly summary, email.
-- **Phase 2:** a simple mobile-friendly dashboard for digging deeper.
-- **Phase 3 (optional):** a plain-English question layer (RAG), off by default
-  behind a feature flag, and demand forecasting.
+- **Done:** import, validation, metrics, weekly summary, email, dashboard,
+  decision log, forecast comparison, festival playbook with cash plan,
+  customer reminders, mix and channel review.
+- **Next:** measure real outcomes. Record each festival forecast and check
+  whether its range held, and test whether the festival reminders bring
+  customers back, with a small holdout group agreed with the shop's owner.
+- **Optional, later:** a plain-English question layer that answers from the
+  existing metric functions, only if it never sends customer data to a third
+  party.
 
 This project grew out of my earlier e-commerce analytics platform
 (dbt, PostgreSQL, Power BI and a RAG layer on the UCI retail dataset), which

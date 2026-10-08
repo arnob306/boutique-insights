@@ -8,7 +8,7 @@ two questions: "what should I reorder?" and "which products make money?".
 
 import html
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import pandas as pd
 
@@ -262,8 +262,12 @@ def money_bullet(line: MoneyLine) -> str:
     return f'{line.product}: {money(line.profit)} profit{margin}, {line.units_sold} sold.'
 
 
-def _sections(r: WeeklyReport) -> list:
+Section = Tuple[str, Optional[str], Tuple[str, ...]]  # (title, intro, bullets)
+
+
+def _sections(r: WeeklyReport) -> List[Section]:
     """(title, intro, bullets) for each part of the report."""
+    reorder: Tuple[Optional[str], Tuple[str, ...]]
     if r.reorder_status == 'no_stock_sheet':
         reorder = ("Reorder advice is off. Add a 'Stock & Orders' sheet to the "
                    'workbook (stock on hand, count date, weeks for a shipment '
@@ -271,11 +275,11 @@ def _sections(r: WeeklyReport) -> list:
     elif r.reorder_status == 'nothing':
         reorder = ('Nothing needs ordering right now.', ())
     else:
-        reorder = (None, tuple(reorder_bullet(l) for l in r.reorder))
+        reorder = (None, tuple(reorder_bullet(line) for line in r.reorder))
     money_intro = None
     if r.overall_margin is not None:
         money_intro = f'Overall margin over the last 12 months: {r.overall_margin * 100:.0f}%.'
-    sections = [
+    sections: List[Section] = [
         ('This week', _this_week_text(r), ()),
         ('Reorder this week', reorder[0], reorder[1]),
     ]
@@ -289,12 +293,12 @@ def _sections(r: WeeklyReport) -> list:
         ))
     sections.append((
         "What's making money (last 12 months)", money_intro,
-        tuple(money_bullet(l) for l in r.top_earners),
+        tuple(money_bullet(line) for line in r.top_earners),
     ))
     if r.small_earners:
         sections.append((
             'Small earners', 'These made the least profit in the last 12 months:',
-            tuple(money_bullet(l) for l in r.small_earners),
+            tuple(money_bullet(line) for line in r.small_earners),
         ))
     if r.mix_notes:
         sections.append(('Mix and channels (last 12 months)', None, r.mix_notes))

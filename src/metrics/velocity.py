@@ -28,7 +28,8 @@ def censored_windows(sales: pd.DataFrame) -> List[CensoredWindow]:
     """Find stock-out and lockdown periods from the Business Event labels."""
     labelled = sales[sales['event'].notna()]
     windows = []
-    for name, group in labelled.groupby('event'):
+    for event_name, group in labelled.groupby('event'):
+        name = str(event_name)
         lowered = name.lower()
         if OUT_OF_STOCK_MARKER in lowered:
             product = name[: lowered.index(OUT_OF_STOCK_MARKER)].strip()

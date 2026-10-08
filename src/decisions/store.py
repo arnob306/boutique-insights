@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Iterator, List, Optional, Sequence
+from typing import Iterator, List, Optional, Sequence, cast
 
 SCHEMA_VERSION = 1
 DEFAULT_LOG_PATH = Path('data/private/decisions.sqlite')
@@ -232,7 +232,7 @@ def add_action(conn: sqlite3.Connection, action: Action) -> int:
     except sqlite3.IntegrityError as exc:
         raise DecisionLogError(
             f'No recommendation with id {action.recommendation_id}.') from exc
-    return int(cursor.lastrowid)
+    return cast(int, cursor.lastrowid)  # always set after a successful INSERT
 
 
 def add_outcome(conn: sqlite3.Connection, outcome: Outcome) -> bool:

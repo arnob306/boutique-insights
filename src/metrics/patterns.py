@@ -88,10 +88,11 @@ def festival_uplift(sales: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=UPLIFT_COLUMNS)
 
     daily = _daily_units(sales)
-    ordinary = _baseline_mask(daily.index, windows, sales)
+    days = pd.DatetimeIndex(daily.index)
+    ordinary = _baseline_mask(days, windows, sales)
     ratios = []
     for _, w in windows.iterrows():
-        in_year = ordinary & (daily.index.year == w['start'].year)
+        in_year = ordinary & (days.year == w['start'].year)
         for category in daily.columns:
             base = daily.loc[in_year, category].mean()
             if not base or pd.isna(base):

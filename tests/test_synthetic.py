@@ -82,7 +82,7 @@ def test_summary_totals_match_the_sales_sheet(workbook_path):
     sales = _sales(workbook_path)
     summary = pd.read_excel(workbook_path, sheet_name='Simple Summary',
                             header=None)
-    labels = dict(zip(summary[0], summary[1]))
+    labels = dict(zip(summary[0], summary[1], strict=True))
     assert labels['Total sales (AUD, after refunds)'] == pytest.approx(
         sales['Sale Total (AUD)'].sum()
     )

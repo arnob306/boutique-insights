@@ -4,6 +4,7 @@ from datetime import date
 import pandas as pd
 import pytest
 
+from src.adapters.boutique_xlsx import load_workbook_data
 from src.decisions.store import (
     Recommendation,
     add_recommendations,
@@ -11,7 +12,6 @@ from src.decisions.store import (
     list_recommendations,
     open_log,
 )
-from src.adapters.boutique_xlsx import load_workbook_data
 from src.metrics.calendar import DEFAULT_CALENDAR_PATH, load_calendar
 from src.metrics.patterns import festival_windows
 from src.reminders import (

@@ -1,0 +1,25 @@
+# Tool settings for linting and type checking. CI runs both (see
+# .github/workflows/python_ci.yaml); run them locally with:
+#   python -m ruff check src tests
+#   python -m mypy
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["data", "reports"]
+
+[tool.ruff.lint]
+# Real bugs and import hygiene only: pycodestyle, pyflakes, isort, bugbear.
+# Style rewrites (for example Optional[X] to X | None) are left alone on purpose.
+select = ["E", "F", "W", "I", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# Short names such as `l` in test comprehensions are fine.
+"tests/*" = ["E741"]
+
+[tool.mypy]
+files = ["src"]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true

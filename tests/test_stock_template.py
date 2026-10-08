@@ -1,5 +1,4 @@
 import pandas as pd
-import pytest
 from openpyxl import load_workbook
 
 from src.run import main

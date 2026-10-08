@@ -29,12 +29,12 @@ def _forecast_rows(sales: pd.DataFrame, as_of: pd.Timestamp) -> List[Recommendat
     velocity = weekly_velocity(sales, as_of).dropna(subset=['units_per_week'])
     return [
         Recommendation(
-            as_of=as_of.date(), product=str(row.Index), kind='forecast',
+            as_of=as_of.date(), product=str(product), kind='forecast',
             model=FORECAST_MODEL, horizon_weeks=FORECAST_HORIZON_WEEKS,
             suggested_qty=0,
-            expected_demand=float(row.units_per_week) * FORECAST_HORIZON_WEEKS,
-            confidence=confidence_label(int(row.sales_count)))
-        for row in velocity.itertuples()
+            expected_demand=float(row['units_per_week']) * FORECAST_HORIZON_WEEKS,
+            confidence=confidence_label(int(row['sales_count'])))
+        for product, row in velocity.iterrows()
     ]
 
 
@@ -48,12 +48,12 @@ def _reorder_rows(
         uplift=festival_uplift(data.sales))
     return [
         Recommendation(
-            as_of=as_of.date(), product=str(row.product), kind='reorder',
-            model=REORDER_MODEL, horizon_weeks=int(row.lead_weeks) + 1,
-            suggested_qty=int(row.order_qty),
-            expected_demand=float(row.expected_demand),
-            confidence=str(row.confidence))
-        for row in suggestions.itertuples()
+            as_of=as_of.date(), product=str(row['product']), kind='reorder',
+            model=REORDER_MODEL, horizon_weeks=int(row['lead_weeks']) + 1,
+            suggested_qty=int(row['order_qty']),
+            expected_demand=float(row['expected_demand']),
+            confidence=str(row['confidence']))
+        for row in suggestions.to_dict('records')
     ]
 
 

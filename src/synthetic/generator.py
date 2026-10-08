@@ -206,7 +206,7 @@ def _sales_for_day(rng, day, pool, seen, counter) -> list:
             'Payment Method': PAYMENT_METHODS[rng.integers(len(PAYMENT_METHODS))],
             'Sales Channel': CHANNELS[rng.integers(len(CHANNELS))],
             'Customer Type': kind, 'Suburb': customer['suburb'],
-            'Festival / Occasion': festival[0] if labelled else None,
+            'Festival / Occasion': festival[0] if festival and labelled else None,
             'Business Event': event[0] if event else None,
         })
     return rows
@@ -304,7 +304,7 @@ def _buy_price_rows(costs: dict, years: list) -> list:
 
 def _profit_table_rows() -> list:
     """The real sheet has a second 'Product' table below the prices."""
-    rows = [
+    rows: list[list] = [
         [],
         ['Estimated profit by product (all years)'],
         ['Product', 'Items sold', 'Sales (AUD)', 'Cost of items (AUD)',
@@ -316,7 +316,7 @@ def _profit_table_rows() -> list:
 
 
 def _stock_rows(rng, end: str) -> list:
-    rows = [STOCK_COLUMNS]
+    rows: list[list] = [STOCK_COLUMNS]
     for product in PRODUCTS:
         rows.append([
             product.name, int(rng.integers(0, 14)),

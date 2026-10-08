@@ -79,7 +79,7 @@ def _read_sheet(path: Path, sheet: str, **kwargs) -> pd.DataFrame:
         return pd.read_excel(path, sheet_name=sheet, **kwargs)
     except ValueError as exc:
         if 'Worksheet named' in str(exc):
-            raise SchemaError(f"Sheet '{sheet}' is missing from {path.name}.")
+            raise SchemaError(f"Sheet '{sheet}' is missing from {path.name}.") from None
         raise
 
 
@@ -212,7 +212,7 @@ def _read_summary(path: Path) -> dict:
         raw = _read_sheet(path, SUMMARY_SHEET, header=None)
     except SchemaError:
         return {}
-    labels = dict(zip(raw[0], raw[1]))
+    labels = dict(zip(raw[0], raw[1], strict=True))
     return {
         key: labels[label]
         for label, key in SUMMARY_LABELS.items()
@@ -245,7 +245,7 @@ def _build_sales(raw: pd.DataFrame, salt: str) -> pd.DataFrame:
     sales['refund_of'] = sales['sale_id'].where(is_refund).str[: -len(REFUND_SUFFIX)]
     sales['customer_id'] = [
         hash_customer(name, suburb, salt)
-        for name, suburb in zip(raw['Customer'], raw['Suburb'])
+        for name, suburb in zip(raw['Customer'], raw['Suburb'], strict=True)
     ]
     return sales
 

@@ -62,7 +62,7 @@ def lead_weeks_from_stock(stock: Optional[pd.DataFrame]) -> Tuple[int, bool]:
     return int(round(stock['weeks_to_arrive'].median())), False
 
 
-def _stage(window, today, order_by) -> Optional[str]:
+def _stage(window, today: pd.Timestamp, order_by: pd.Timestamp) -> Optional[str]:
     if window.end < today:
         return 'clearance' if (today - window.end).days <= CLEARANCE_DAYS else None
     if window.start <= today:
@@ -83,16 +83,16 @@ def _lifts(uplift: pd.DataFrame, festival: str) -> Tuple[Lift, ...]:
     rows = uplift[(uplift['festival'] == festival) & (uplift['uplift'] >= MIN_UPLIFT)]
     rows = rows.sort_values('uplift', ascending=False).head(MAX_LIFTS)
     return tuple(
-        Lift(r.category, float(r.uplift), int(r.windows),
-             'solid' if r.windows >= SOLID_WINDOWS else 'rough')
-        for r in rows.itertuples()
+        Lift(str(r['category']), float(r['uplift']), int(r['windows']),
+             'solid' if r['windows'] >= SOLID_WINDOWS else 'rough')
+        for r in rows.to_dict('records')
     )
 
 
 def _lift_text(festival: str, lifts: Tuple[Lift, ...], uplift: pd.DataFrame) -> str:
     if lifts:
-        parts = [f'{l.category} about {l.uplift:.1f}x ({l.confidence}, '
-                 f'{l.windows} past years)' for l in lifts]
+        parts = [f'{lift.category} about {lift.uplift:.1f}x ({lift.confidence}, '
+                 f'{lift.windows} past years)' for lift in lifts]
         return ' Usually sells faster: ' + ', '.join(parts) + '.'
     if (uplift['festival'] == festival).any():
         return ''

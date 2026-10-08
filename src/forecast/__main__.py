@@ -115,7 +115,8 @@ def main(argv=None) -> int:
     try:
         data = _load(args.file)
         demand = weekly_demand(data.sales)
-        censored = censored_weeks(data.sales, demand.index, demand.columns)
+        censored = censored_weeks(
+            data.sales, pd.DatetimeIndex(demand.index), demand.columns)
         results = run_comparison(
             demand, censored, horizon=args.horizon,
             min_train=args.min_train, step=args.step)

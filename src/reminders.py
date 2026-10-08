@@ -94,7 +94,8 @@ def load_customer_rows(path) -> pd.DataFrame:
         raw = pd.read_excel(path, sheet_name=SALES_SHEET)
     except ValueError as exc:
         if 'Worksheet named' in str(exc):
-            raise SchemaError(f"Sheet '{SALES_SHEET}' is missing from {path.name}.")
+            raise SchemaError(
+                f"Sheet '{SALES_SHEET}' is missing from {path.name}.") from None
         raise
     missing = [c for c in SOURCE_COLUMNS if c not in raw.columns]
     if missing:
@@ -117,6 +118,11 @@ def _commonest(values: pd.Series) -> Optional[str]:
     return Counter(cleaned).most_common(1)[0][0] if cleaned else None
 
 
+def _commonest_name(values: pd.Series) -> str:
+    """The commonest spelling of a name; groups are built from named rows only."""
+    return _commonest(values) or ''
+
+
 def _top_category(group: pd.DataFrame) -> Optional[str]:
     spend = group.dropna(subset=['category']).groupby('category')['amount'].sum()
     return None if spend.empty else str(spend.idxmax())
@@ -130,7 +136,7 @@ def _customer_line(group: pd.DataFrame, today: pd.Timestamp):
     gaps = pd.Series(days).diff().dropna().dt.days
     last = pd.Timestamp(days[-1])
     line = ReminderLine(
-        name=_commonest(group['name']), suburb=None, last_purchase=last,
+        name=_commonest_name(group['name']), suburb=None, last_purchase=last,
         days_since=int((today - last).days),
         usual_gap_days=max(int(round(gaps.median())), MIN_GAP_DAYS),
         purchases=len(days), top_category=_top_category(group),
@@ -165,10 +171,11 @@ def build_reminders(rows: pd.DataFrame, today) -> Reminders:
     """Who is due a nudge, biggest spenders first, capped at MAX_LINES."""
     today = pd.Timestamp(today).normalize()
     lines = _with_suburbs(_repeat_customers(rows, today))
-    due = [l for l in lines
-           if 0 <= l.days_since - l.usual_gap_days <= DUE_WINDOW_DAYS]
-    quiet = [l for l in lines if l.days_since > LAPSE_FACTOR * l.usual_gap_days]
-    due.sort(key=lambda l: (-l.spend, l.name))
+    due = [line for line in lines
+           if 0 <= line.days_since - line.usual_gap_days <= DUE_WINDOW_DAYS]
+    quiet = [line for line in lines
+             if line.days_since > LAPSE_FACTOR * line.usual_gap_days]
+    due.sort(key=lambda line: (-line.spend, line.name))
     return Reminders(tuple(due[:MAX_LINES]), len(due), len(quiet))
 
 
@@ -176,7 +183,7 @@ def _last_year_window(window, past_windows: pd.DataFrame):
     """The same festival's past window that starts nearest a year earlier."""
     if past_windows.empty:
         return None
-    same =past_windows[(past_windows['festival'] == window.name)
+    same = past_windows[(past_windows['festival'] == window.name)
                         & (past_windows['end'] < window.start)]
     anchor = window.start - pd.Timedelta(days=YEAR_DAYS)
     gap = (same['start'] - anchor).abs().dt.days
@@ -197,7 +204,7 @@ def _festival_regulars(window_buys, attended: Counter, skip: set) -> list:
         if key in skip:
             continue
         regulars.append(FestivalRegular(
-            name=_commonest(group['name']), suburb=_commonest(group['suburb']),
+            name=_commonest_name(group['name']), suburb=_commonest(group['suburb']),
             top_category=_top_category(group), spend=float(group['amount'].sum()),
             festivals_attended=attended[key]))
     shared = Counter(_key(r.name) for r in regulars)
@@ -208,12 +215,12 @@ def _festival_regulars(window_buys, attended: Counter, skip: set) -> list:
 
 def _festival_list(window, last, buys, past_windows, today) -> Optional[FestivalList]:
     recent = _bought_in(buys, today - pd.Timedelta(days=RECENT_BUYER_DAYS), today)
-    skip = set(zip(recent['name_key'], recent['suburb_key']))
-    attended = Counter()
+    skip = set(zip(recent['name_key'], recent['suburb_key'], strict=True))
+    attended: Counter[tuple[str, str]] = Counter()
     for _, past in past_windows[(past_windows['festival'] == window.name)
                                 & (past_windows['end'] < window.start)].iterrows():
         seen = _bought_in(buys, past['start'], past['end'])
-        attended.update(set(zip(seen['name_key'], seen['suburb_key'])))
+        attended.update(set(zip(seen['name_key'], seen['suburb_key'], strict=True)))
     regulars = _festival_regulars(_bought_in(buys, last['start'], last['end']),
                                   attended, skip)
     if not regulars:
@@ -245,13 +252,14 @@ def _days_ago(days: int) -> str:
     return 'yesterday' if days == 1 else f'{days} days ago'
 
 
-def _line_text(l: ReminderLine) -> str:
-    who = f'{l.name} ({l.suburb})' if l.suburb else l.name
-    text = (f'{who}: last bought {l.last_purchase:%d %b %Y} ({_days_ago(l.days_since)}), '
-            f'usually every {l.usual_gap_days} days ({l.purchases} purchases).')
-    if l.top_category:
-        text += f' Usually buys {l.top_category}.'
-    return text + f' Spent {money(l.spend)} in total.'
+def _line_text(line: ReminderLine) -> str:
+    who = f'{line.name} ({line.suburb})' if line.suburb else line.name
+    text = (f'{who}: last bought {line.last_purchase:%d %b %Y} '
+            f'({_days_ago(line.days_since)}), usually every {line.usual_gap_days} days '
+            f'({line.purchases} purchases).')
+    if line.top_category:
+        text += f' Usually buys {line.top_category}.'
+    return text + f' Spent {money(line.spend)} in total.'
 
 
 def _regular_text(r: FestivalRegular) -> str:
@@ -283,7 +291,7 @@ def _gap_section(result: Reminders) -> list:
         if result.due_count > len(result.due):
             head += f' (the {len(result.due)} who have spent most are listed)'
         lines += [head + '.', '']
-        lines += [f'- {_line_text(l)}' for l in result.due]
+        lines += [f'- {_line_text(line)}' for line in result.due]
     if result.quiet_count:
         lines += ['', f'{result.quiet_count} more have gone quiet (nothing bought for '
                   f'over {LAPSE_FACTOR} times their usual gap) and are not listed.']

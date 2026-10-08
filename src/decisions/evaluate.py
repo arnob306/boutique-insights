@@ -11,7 +11,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, cast
 
 import pandas as pd
 
@@ -62,7 +62,7 @@ def evaluate_due(
         ]
         units = int(in_window['quantity'].sum())
         outcome = Outcome(
-            recommendation_id=int(rec.id), evaluated_on=evaluated_on,
+            recommendation_id=cast(int, rec.id), evaluated_on=evaluated_on,
             units_sold=units, forecast_error=rec.expected_demand - units)
         written += add_outcome(conn, outcome)
     return written

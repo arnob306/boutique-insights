@@ -141,7 +141,7 @@ def _hero(r: WeeklyReport) -> str:
 def _bar(index: int, week, value: float, top: float, slot: float, latest: bool) -> str:
     width = min(MAX_BAR_WIDTH, max(slot - BAR_GAP, 1))
     x = index * slot + (slot - width) / 2
-    height = max(MIN_BAR_HEIGHT, value / top * (PLOT_HEIGHT - LABEL_ROOM)) if value > 0 else 0
+    height = max(MIN_BAR_HEIGHT, value / top * (PLOT_HEIGHT - LABEL_ROOM)) if value > 0 else 0.0
     css = 'bar latest' if latest else 'bar'
     return (
         f'<rect class="{css}" data-week="{week:%Y-%m-%d}" x="{x:.1f}" '
@@ -158,7 +158,9 @@ def _value_label(index: int, value: float, top: float, slot: float, text: str) -
 
 
 def _month_ticks(weeks: pd.DatetimeIndex, slot: float) -> str:
-    ticks, last_x, last_month = [], -MIN_MONTH_GAP, None
+    ticks: list[str] = []
+    last_x: float = -MIN_MONTH_GAP
+    last_month: Optional[int] = None
     for i, week in enumerate(weeks):
         if week.month != last_month and i * slot - last_x >= MIN_MONTH_GAP:
             ticks.append(f'<text class="tick" x="{i * slot:.1f}" '
@@ -193,7 +195,7 @@ def _sales_chart(series: pd.DataFrame) -> str:
         f'<svg viewBox="0 0 {CHART_WIDTH} {CHART_HEIGHT}" role="img" '
         f'aria-label="{_esc(label)}">{bars}'
         f'<line class="axis" x1="0" x2="{CHART_WIDTH}" y1="{PLOT_HEIGHT}" '
-        f'y2="{PLOT_HEIGHT}"/>{_month_ticks(series.index, slot)}'
+        f'y2="{PLOT_HEIGHT}"/>{_month_ticks(pd.DatetimeIndex(series.index), slot)}'
         f'{_chart_labels(values, top, slot)}</svg>'
         '<p class="note">One bar per week. The amber bar is the last 7 days.</p>'
         f'{_table_view(series)}'

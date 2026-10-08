@@ -7,7 +7,7 @@ cost. This is plain arithmetic for the report; it does not predict anything.
 """
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Hashable, Optional, Tuple
 
 import pandas as pd
 
@@ -48,8 +48,9 @@ def _shares(frame: pd.DataFrame, key: str) -> Optional[pd.Series]:
     return net / total if total > 0 else None
 
 
-def _change(now: pd.Series, before: Optional[pd.Series], name: str) -> Optional[float]:
-    return None if before is None else float(now[name] - before.get(name, 0.0))
+def _change(now: pd.Series, before: Optional[pd.Series],
+            name: Hashable) -> Optional[float]:
+    return None if before is None else float(now.get(name, 0.0) - before.get(name, 0.0))
 
 
 def _margin(frame: pd.DataFrame) -> Optional[float]:
@@ -69,12 +70,12 @@ def category_mix(sales: pd.DataFrame, as_of) -> Tuple[CategoryLine, ...]:
         return ()
     before = _shares(before_frame, 'category')
     lines = [
-        CategoryLine(name, float(share),
+        CategoryLine(str(name), float(share),
                      _margin(now_frame[now_frame['category'] == name]),
                      _change(now, before, name))
         for name, share in now.items()
     ]
-    return tuple(sorted(lines, key=lambda l: (-l.revenue_share, l.category)))
+    return tuple(sorted(lines, key=lambda line: (-line.revenue_share, line.category)))
 
 
 def channel_mix(sales: pd.DataFrame, as_of) -> Tuple[ChannelLine, ...]:
@@ -84,9 +85,9 @@ def channel_mix(sales: pd.DataFrame, as_of) -> Tuple[ChannelLine, ...]:
     if now is None:
         return ()
     before = _shares(_period(sales, as_of, 1), 'channel')
-    lines = [ChannelLine(name, float(share), _change(now, before, name))
+    lines = [ChannelLine(str(name), float(share), _change(now, before, name))
              for name, share in now.items()]
-    return tuple(sorted(lines, key=lambda l: (-l.share, l.channel)))
+    return tuple(sorted(lines, key=lambda line: (-line.share, line.channel)))
 
 
 def _points(change: float) -> str:
@@ -105,8 +106,8 @@ def _category_notes(categories: Tuple[CategoryLine, ...]) -> list:
               if c.margin is not None and c.revenue_share >= MIN_BEST_MARGIN_SHARE
               and c.margin > (top.margin if top.margin is not None else -1.0)]
     if rivals:
-        best = max(rivals, key=lambda c: c.margin)
-        notes.append(f'{best.category} earns the best margin ({best.margin:.0%}) '
+        best = max(rivals, key=lambda c: c.margin or 0.0)
+        notes.append(f'{best.category} earns the best margin ({best.margin or 0.0:.0%}) '
                      f'but is only {best.revenue_share:.0%} of sales.')
     return notes
 
@@ -122,8 +123,8 @@ def _channel_notes(channels: Tuple[ChannelLine, ...]) -> list:
     movers = [c for c in channels[1:]
               if c.share_change is not None and abs(c.share_change) >= MIN_SHIFT]
     if movers:
-        mover = max(movers, key=lambda c: abs(c.share_change))
-        notes.append(f'{mover.channel} is {_points(mover.share_change)} on the year '
+        mover = max(movers, key=lambda c: abs(c.share_change or 0.0))
+        notes.append(f'{mover.channel} is {_points(mover.share_change or 0.0)} on the year '
                      f'before, at {mover.share:.0%} of sales.')
     return notes
 
