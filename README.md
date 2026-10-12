@@ -63,9 +63,12 @@ and moves the workbook to `data/private/archive/`. If the data has critical
 problems the report is marked "not trusted", and it is never emailed or archived.
 
 Add `--dashboard` to also write `dashboard_<date>.html`, a one-page view for a
-phone: weekly sales chart, reorder advice, and profit by product. It is a single
-file with no scripts or links, built from the same figures as the email, so the
-two cannot disagree. With `--send` the dashboard is attached to the email
+phone. It is laid out around what she opens it to find out: status tiles (this
+week against a usual week), a "Do this week" list ranked Now, Soon and FYI,
+the sales chart with a usual-week line, reorder cover against shipment time,
+festival cards with an expected-sales range, and profit and mix further down.
+It is a single file with no scripts or external links, built from the same
+figures as the email, so the two cannot disagree. With `--send` the dashboard is attached to the email
 automatically, so she can open it on her phone.
 
 To run it every week on Windows, once the `.env` is filled in, create a

@@ -1,3 +1,4 @@
+import re
 from dataclasses import replace
 
 import pandas as pd
@@ -6,8 +7,10 @@ from test_report import _build
 
 from src.adapters.boutique_xlsx import load_workbook_data
 from src.metrics.calendar import FestivalWindow
+from src.metrics.cashplan import CashPlan
 from src.metrics.trends import weekly_series
-from src.reports.dashboard import WEEKS_SHOWN, render_dashboard
+from src.reports.dashboard import MAX_ACTIONS, WEEKS_SHOWN, render_dashboard
+from src.reports.playbook import Lift, PlaybookItem
 from src.reports.weekly import ReorderLine, money
 
 SALT = 'unit-test-salt-0123456789'
@@ -207,3 +210,225 @@ def test_the_dashboard_has_a_mix_and_channels_section(built, page):
 
 def test_the_dashboard_has_no_playbook_section_without_a_calendar(page):
     assert 'Festival playbook' not in page
+
+
+# --- the redesign: answer "what do I do?" first --------------------------------
+
+def _reorder_line(product, stock=1, per_week=1.0, lead=6, qty=4):
+    return ReorderLine(product=product, order_qty=qty, stock_now=stock,
+                       units_per_week=per_week, lead_weeks=lead,
+                       confidence='good', note='')
+
+
+def _festival_item(stage='order_now', festival='Durga Puja', cash='none', lifts=()):
+    start = pd.Timestamp('2026-10-10')
+    return PlaybookItem(
+        festival=festival, start=start, end=start + pd.Timedelta(days=11), stage=stage,
+        order_by=start - pd.Timedelta(weeks=6), lead_weeks=6, lead_assumed=True,
+        lifts=tuple(lifts), text=f'{festival} text.', cash=None if cash == 'none' else cash)
+
+
+def _cash(**overrides):
+    fields = dict(festival='Durga Puja', expected=1000.0, low=600.0, high=2000.0,
+                  lift_windows=4, backtest_windows=12, budget_low=300.0,
+                  budget_expected=500.0)
+    return CashPlan(**{**fields, **overrides})
+
+
+def _quiet(report, **overrides):
+    """The report with nothing that needs doing, plus any overrides."""
+    base = replace(report, reorder=(), reorder_status='nothing', playbook=(),
+                   reminder_count=None, festival_reminder_counts=())
+    return replace(base, **overrides)
+
+
+def _actions_block(page):
+    start = page.index('id="actions"')
+    return page[start:page.index('</section>', start)]
+
+
+def test_the_first_section_says_what_to_do_this_week(page):
+    assert 'id="actions"' in page
+    assert 'Do this week' in page
+    assert page.index('id="actions"') < page.index('id="sales"')
+
+
+def test_a_quiet_week_says_nothing_is_urgent(built):
+    _, report, series = built
+    page = render_dashboard(_quiet(report), series)
+    assert 'Nothing urgent this week' in _actions_block(page)
+
+
+def test_actions_are_ordered_most_urgent_first(built):
+    _, report, series = built
+    page = render_dashboard(_quiet(
+        report,
+        reorder=(_reorder_line('Long Cover', stock=40, per_week=1.0, lead=3),
+                 _reorder_line('Short Cover', stock=1, per_week=1.0, lead=6)),
+        reorder_status='orders',
+        playbook=(_festival_item('order_soon'),),
+        reminder_count=3), series)
+    urgencies = re.findall(r'data-urgency="(\w+)"', _actions_block(page))
+    assert urgencies == ['now', 'soon', 'soon', 'info']
+    assert _actions_block(page).index('Short Cover') < _actions_block(page).index('Long Cover')
+
+
+def test_a_festival_past_its_order_by_date_is_an_order_now_action(built):
+    _, report, series = built
+    page = render_dashboard(_quiet(report, playbook=(_festival_item('order_now'),)), series)
+    block = _actions_block(page)
+    assert 'Durga Puja' in block and 'order now' in block.lower()
+    assert 'data-urgency="now"' in block
+
+
+def test_every_action_pill_says_its_urgency_in_words(built):
+    _, report, series = built
+    page = render_dashboard(_quiet(
+        report, reorder=(_reorder_line('Short Cover'),), reorder_status='orders',
+        playbook=(_festival_item('order_soon'),), reminder_count=2), series)
+    pills = re.findall(r'class="pill \w+">([^<]+)</span>', _actions_block(page))
+    assert pills == ['Now', 'Soon', 'FYI']
+
+
+def test_the_action_list_is_capped_with_a_pointer_to_the_rest(built):
+    _, report, series = built
+    lines = tuple(_reorder_line(f'Saree {i}') for i in range(MAX_ACTIONS + 3))
+    page = render_dashboard(_quiet(report, reorder=lines, reorder_status='orders'), series)
+    block = _actions_block(page)
+    assert block.count('data-urgency=') == MAX_ACTIONS
+    assert '3 more in the sections below' in block
+
+
+def test_stock_that_runs_out_just_before_the_shipment_does_not_read_as_a_tie(built):
+    _, report, series = built
+    line = _reorder_line('Gold Bangles', stock=19, per_week=5.0, lead=4)  # 3.8 weeks
+    page = render_dashboard(_quiet(report, reorder=(line,), reorder_status='orders'), series)
+    block = _actions_block(page)
+    assert 'runs out in 3.8 weeks' in block
+    assert 'runs out in 4 weeks' not in block
+
+
+# --- status tiles ------------------------------------------------------------------
+
+@pytest.mark.parametrize('sales,usual,trend,glyph', [
+    (1200.0, 1000.0, 'up', '▲'),
+    (800.0, 1000.0, 'down', '▼'),
+    (1000.0, 1000.0, 'flat', '='),
+])
+def test_the_status_tile_compares_with_a_usual_week(built, sales, usual, trend, glyph):
+    _, report, series = built
+    page = render_dashboard(
+        replace(report, sales_this_week=sales, usual_week_sales=usual), series)
+    assert f'data-trend="{trend}"' in page
+    assert glyph in page
+
+
+def test_without_a_usual_week_there_is_no_trend_tile(built):
+    _, report, series = built
+    page = render_dashboard(replace(report, usual_week_sales=None), series)
+    assert 'data-trend=' not in page
+
+
+def test_profit_and_margin_have_their_own_tile(built):
+    _, report, series = built
+    page = render_dashboard(
+        replace(report, profit_this_week=321.0, overall_margin=0.47), series)
+    assert money(321.0) in page and '47%' in page
+
+
+# --- the chart gets a reference and a comparison ----------------------------------
+
+def _series(values):
+    index = pd.date_range('2026-06-01', periods=len(values), freq='7D')
+    return pd.DataFrame({'sales': values, 'profit': [v / 2 for v in values],
+                         'units': [1] * len(values)}, index=index)
+
+
+def test_the_chart_marks_a_usual_week(built):
+    _, report, series = built
+    assert 'data-usual-week=' in render_dashboard(
+        replace(report, usual_week_sales=500.0), series)
+
+
+def test_there_is_no_usual_line_without_a_usual_week(built):
+    _, report, series = built
+    assert 'data-usual-week=' not in render_dashboard(
+        replace(report, usual_week_sales=None), series)
+
+
+def test_the_last_four_weeks_are_compared_with_the_four_before(built):
+    _, report, _ = built
+    page = render_dashboard(report, _series([100.0] * 4 + [150.0] * 4))
+    assert f'Last 4 weeks: {money(600.0)}, up 50% on the 4 weeks before.' in page
+
+
+def test_a_fall_is_called_a_fall(built):
+    _, report, _ = built
+    page = render_dashboard(report, _series([200.0] * 4 + [100.0] * 4))
+    assert 'down 50% on the 4 weeks before' in page
+
+
+def test_short_history_gets_no_four_week_comparison(built):
+    _, report, _ = built
+    assert 'Last 4 weeks' not in render_dashboard(report, _series([100.0] * 7))
+
+
+def test_no_comparison_when_the_earlier_weeks_sold_nothing(built):
+    _, report, _ = built
+    assert 'Last 4 weeks' not in render_dashboard(report, _series([0.0] * 4 + [50.0] * 4))
+
+
+# --- festival cards ----------------------------------------------------------------
+
+def test_a_festival_card_draws_the_expected_sales_and_range(built):
+    _, report, series = built
+    page = render_dashboard(replace(
+        report, playbook=(_festival_item(cash=_cash()),)), series)
+    assert 'data-festival="Durga Puja"' in page
+    assert 'data-expected="1000"' in page
+    assert 'data-range-low="600"' in page and 'data-range-high="2000"' in page
+    assert f'{money(600.0)} to {money(2000.0)}' in page
+    assert 'stock budget' in page.lower()
+
+
+def test_a_card_without_a_cash_plan_has_no_range_bar(built):
+    _, report, series = built
+    page = render_dashboard(replace(report, playbook=(_festival_item(),)), series)
+    assert 'data-festival="Durga Puja"' in page
+    assert 'data-range-low=' not in page and 'data-expected=' not in page
+
+
+def test_a_card_without_a_range_says_there_is_not_enough_history(built):
+    _, report, series = built
+    page = render_dashboard(replace(report, playbook=(
+        _festival_item(cash=_cash(low=None, high=None, budget_low=None)),)), series)
+    assert 'data-expected="1000"' in page
+    assert 'data-range-low=' not in page
+    assert 'not enough history for a range' in page
+
+
+def test_a_card_says_its_stage_in_words_and_shows_the_lifts(built):
+    _, report, series = built
+    page = render_dashboard(replace(report, playbook=(_festival_item(
+        'order_soon', lifts=[Lift('Saree', 3.0, 5, 'solid')]),)), series)
+    assert 'Order soon' in page
+    assert 'Saree' in page and '3.0x' in page and 'solid' in page
+
+
+# --- navigation and the data footer ------------------------------------------------
+
+def test_every_jump_link_points_at_a_section_that_exists(built):
+    _, report, series = built
+    page = render_dashboard(replace(
+        report, playbook=(_festival_item(cash=_cash()),), reminder_count=2), series)
+    targets = re.findall(r'href="#([\w-]+)"', page)
+    assert len(targets) >= 4
+    for target in targets:
+        assert f'id="{target}"' in page
+
+
+def test_data_notes_are_tucked_into_a_labelled_summary(built):
+    _, report, series = built
+    page = render_dashboard(replace(report, data_notes=('One odd row.', 'Two odd rows.')), series)
+    assert 'Data checks (2)' in page and 'One odd row.' in page
+    assert 'Data checks' not in render_dashboard(replace(report, data_notes=()), series)

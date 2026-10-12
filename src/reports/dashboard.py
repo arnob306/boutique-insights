@@ -1,35 +1,46 @@
 """
 A one-page, phone-friendly dashboard.
 
-Plain HTML and inline SVG: no scripts, no links, no images, no network calls,
-so it can be opened from a file or an email attachment. It shows the same
-figures as the weekly summary (built from the same ``WeeklyReport``) plus a
-weekly sales chart. Only totals are drawn; no customer details are available
+Plain HTML and inline SVG: no scripts, no external links, no images, no network
+calls, so it can be opened from a file or an email attachment. It shows the
+same figures as the weekly summary (built from the same ``WeeklyReport``) plus
+a weekly sales chart. Only totals are drawn; no customer details are available
 here.
 
-Look: indigo and amber on cool paper, with a woven border stripe like the
-edge of a saree. Colours were checked with the dataviz palette validator in
-both light and dark mode.
+It is organised around the questions she opens it with, in this order:
+
+1. Is the week healthy?          status tiles
+2. What should I do?             "Do this week", most urgent first
+3. What changed?                 sales chart, usual-week line, last 4 weeks
+4. Where is the risk?            reorder cover and festival cards
+5. Where does the money come from?  profit by product, mix and channels
+
+The few in-page jump links are plain anchors (no scripts). The look is in
+``dashboard_style.py``.
 """
 
 import html
-from typing import Iterable, Optional
+from dataclasses import dataclass
+from typing import Iterable, List, Optional, Tuple
 
 import pandas as pd
 
-from src.reports.playbook import PLAYBOOK_FOOTER
+from src.metrics.cashplan import CashPlan
+from src.reports.dashboard_style import CSS
+from src.reports.playbook import PLAYBOOK_FOOTER, PlaybookItem
 from src.reports.weekly import (
     UNTRUSTED_BANNER,
     MoneyLine,
     ReorderLine,
     WeeklyReport,
-    money,
     festival_reminder_line,
+    money,
     money_bullet,
     reminder_text,
 )
 
 WEEKS_SHOWN = 26
+MAX_ACTIONS = 6
 CHART_WIDTH = 360
 PLOT_HEIGHT = 120
 CHART_HEIGHT = 150
@@ -41,102 +52,135 @@ MIN_MONTH_GAP = 34  # keeps month names from touching
 MIN_LABEL_GAP_WEEKS = 4
 MIN_FILL_PERCENT = 2.0
 METER_HEADROOM = 1.25
+RANGE_HEADROOM = 1.1  # room to the right of a festival's high estimate
+RECENT_WEEKS = 4
 
-_CSS = (
-    ':root{--paper:#f5f6fa;--ink:#1c2147;--ink2:#464b70;--muted:#666b8f;'
-    '--rule:#d9dcea;--indigo:#3b4ba8;--amber:#c97c00;--loss:#b3382c;'
-    '--warn:#fbe9e7}'
-    '@media (prefers-color-scheme:dark){:root{--paper:#14172b;--ink:#eef0fa;'
-    '--ink2:#b9bedd;--muted:#8e94ba;--rule:#2a2f52;--indigo:#6f80e8;'
-    '--amber:#c48410;--loss:#d8604f;--warn:#3a1f22}}'
-    '*{box-sizing:border-box}'
-    'body{margin:0;background:var(--paper);color:var(--ink);'
-    'font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;'
-    'font-size:16px;line-height:1.5}'
-    '.paar{height:14px;background:'
-    'linear-gradient(var(--amber),var(--amber)) 0 2px/100% 2px no-repeat,'
-    'linear-gradient(var(--indigo),var(--indigo)) 0 6px/100% 4px no-repeat,'
-    'linear-gradient(var(--amber),var(--amber)) 0 12px/100% 2px no-repeat}'
-    'main{max-width:640px;margin:0 auto;padding:20px 16px 40px}'
-    'h1,h2{font-family:Georgia,"Times New Roman",serif;font-weight:700;'
-    'line-height:1.2}'
-    'h1{font-size:26px;margin:0 0 2px}'
-    'h2{font-size:20px;margin:0 0 12px}'
-    'section{border-top:1px solid var(--rule);padding-top:20px;margin-top:28px}'
-    '.when{color:var(--muted);margin:0 0 20px}'
-    '.hero{margin:0}'
-    '.hero-label{margin:0;color:var(--ink2)}'
-    '.hero-number{margin:0;font-size:56px;font-weight:700;line-height:1.1;'
-    'letter-spacing:-0.02em;font-variant-numeric:lining-nums tabular-nums}'
-    '.hero-line{margin:6px 0 0;color:var(--ink2);max-width:34em}'
-    '.banner{border-left:4px solid var(--loss);background:var(--warn);'
-    'padding:12px 14px;margin:0 0 20px}'
-    'svg{width:100%;height:auto;display:block}'
-    '.bar{fill:var(--indigo)}.bar:hover{opacity:.75}'
-    '.bar.latest{fill:var(--amber)}'
-    '.axis{stroke:var(--rule);stroke-width:1}'
-    '.tick,.val{fill:var(--ink2);font-size:10px;'
-    'font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}'
-    '.val{font-weight:700;fill:var(--ink)}'
-    '.note{color:var(--muted);font-size:14px;margin:8px 0 0}'
-    'details{margin-top:12px}'
-    'summary{cursor:pointer;color:var(--indigo);font-weight:600}'
-    'summary:focus-visible{outline:2px solid var(--indigo);outline-offset:3px}'
-    'table{border-collapse:collapse;width:100%;margin-top:8px;'
-    'font-variant-numeric:tabular-nums}'
-    'th,td{text-align:right;padding:6px 4px;border-bottom:1px solid var(--rule)}'
-    'th:first-child,td:first-child{text-align:left}'
-    'ul{list-style:none;padding:0;margin:0}'
-    '.plain li{padding:8px 0 8px 12px;border-left:3px solid var(--rule);'
-    'margin-bottom:8px}'
-    '.order{padding:0 0 18px}'
-    '.order-head{display:flex;gap:10px;align-items:baseline}'
-    '.order-qty{font-size:20px;font-weight:700;min-width:5.5em}'
-    '.order-name{font-weight:600}'
-    '.order-text{margin:2px 0 8px;color:var(--ink2);font-size:15px}'
-    '.meter{position:relative;height:10px;background:var(--rule);'
-    'border-radius:5px}'
-    '.meter-fill{height:10px;border-radius:5px;background:var(--indigo)}'
-    '.meter-fill.short{background:var(--amber)}'
-    '.meter-mark{position:absolute;top:-4px;width:2px;height:18px;'
-    'background:var(--ink)}'
-    '.row{margin:0 0 14px}.row-text{font-size:15px}'
-    '.track{background:var(--rule);border-radius:4px;margin-top:4px}'
-    '.fill{height:8px;border-radius:4px;background:var(--indigo)}'
-    '.fill.loss{background:var(--loss)}'
-)
+_URGENCY_RANK = {'now': 0, 'soon': 1, 'info': 2}
+_PILL_WORD = {'now': 'Now', 'soon': 'Soon', 'info': 'FYI'}
+_STAGE_WORD = {
+    'later': 'Later', 'order_soon': 'Order soon', 'order_now': 'Order now',
+    'preview': 'Too late to order', 'on_now': 'On now', 'clearance': 'Just finished',
+}
+_STAGE_TONE = {'order_now': 'now', 'order_soon': 'soon'}
+
+
+@dataclass(frozen=True)
+class _Action:
+    urgency: str  # now | soon | info
+    text: str
 
 
 def _esc(value: object) -> str:
     return html.escape(str(value))
 
 
-def _versus_usual(r: WeeklyReport) -> str:
+def _weeks(count: float) -> str:
+    whole = round(count)
+    return f'{whole} week' if whole == 1 else f'{whole} weeks'
+
+
+# --- status tiles: is the week healthy? ---------------------------------------
+
+def _trend(r: WeeklyReport) -> Optional[Tuple[str, str, str]]:
+    """(direction, value, caption) against a usual week, or None."""
     if r.usual_week_sales is None:
-        return ''
+        return None
     gap = r.sales_this_week - r.usual_week_sales
     if round(abs(gap)) == 0:
-        return 'About the same as a usual week.'
-    direction = 'more' if gap > 0 else 'less'
-    return f'{money(abs(gap))} {direction} than a usual week.'
+        return 'flat', '= Same', 'as a usual week'
+    if gap > 0:
+        return 'up', f'▲ {money(gap)}', 'more than a usual week'
+    return 'down', f'▼ {money(-gap)}', 'less than a usual week'
 
 
-def _hero_line(r: WeeklyReport) -> str:
-    parts = [_versus_usual(r)]
-    if r.profit_this_week is not None:
-        parts.append(f'Estimated profit {money(r.profit_this_week)}.')
-    if r.overall_margin is not None:
-        parts.append(f'Margin over the last 12 months: {r.overall_margin * 100:.0f}%.')
-    return ' '.join(part for part in parts if part)
+def _tile(label: str, value: str, caption: str, extra: str = '', css: str = '') -> str:
+    sub = f'<p class="tile-sub">{_esc(caption)}</p>' if caption else ''
+    return (f'<div class="tile{css}"{extra}><p class="tile-label">{_esc(label)}</p>'
+            f'<p class="tile-value">{_esc(value)}</p>{sub}</div>')
 
 
-def _hero(r: WeeklyReport) -> str:
-    return (
-        '<p class="hero-label">Sold in the last 7 days</p>'
-        f'<p class="hero-number">{_esc(money(r.sales_this_week))}</p>'
-        f'<p class="hero-line">{_esc(_hero_line(r))}</p>'
-    )
+def _tiles(r: WeeklyReport) -> str:
+    last_year = (f'Same week last year: {money(r.sales_last_year)}'
+                 if r.sales_last_year is not None else '')
+    tiles = [_tile('Sold in the last 7 days', money(r.sales_this_week), last_year,
+                   css=' main')]
+    trend = _trend(r)
+    if trend:
+        direction, value, caption = trend
+        tiles.append(_tile('This week vs usual', value, caption,
+                           extra=f' data-trend="{direction}"', css=f' {direction}'))
+    if r.profit_this_week is not None or r.overall_margin is not None:
+        profit = money(r.profit_this_week) if r.profit_this_week is not None else 'n/a'
+        margin = (f'Margin over the last 12 months: {r.overall_margin * 100:.0f}%'
+                  if r.overall_margin is not None else '')
+        tiles.append(_tile('Estimated profit this week', profit, margin))
+    return f'<div class="tiles">{"".join(tiles)}</div>'
 
+
+# --- do this week: what should I do? ----------------------------------------------
+
+def _cover_weeks(line: ReorderLine) -> Optional[float]:
+    return line.stock_now / line.units_per_week if line.units_per_week > 0 else None
+
+
+def _festival_action(item: PlaybookItem) -> Optional[_Action]:
+    name, order_by = item.festival, f'{item.order_by:%d %b}'
+    if item.stage == 'order_now':
+        return _Action('now', f'{name}: order now. The order-by date was {order_by}.')
+    if item.stage == 'order_soon':
+        return _Action('soon', f'{name}: order by {order_by}.')
+    if item.stage == 'preview':
+        return _Action('info', f'{name}: too late to order a shipment in time. '
+                               'Sell what is in stock.')
+    if item.stage == 'on_now':
+        return _Action('info', f'{name} is on. Keep an eye on stock.')
+    return None
+
+
+def _reorder_action(line: ReorderLine) -> _Action:
+    cover = _cover_weeks(line)
+    head = f'Order {line.order_qty} {line.product}: '
+    if cover is None:
+        return _Action('soon', head + 'no recent sales, so treat this as a rough guess.')
+    if cover < line.lead_weeks:
+        # Whole weeks would hide a near miss ("4 weeks, before a 4-week shipment").
+        left = f'{cover:.1f} weeks' if round(cover) >= line.lead_weeks else _weeks(cover)
+        return _Action('now', head + f'stock runs out in {left}, before a '
+                                     f'shipment ({_weeks(line.lead_weeks)}) arrives.')
+    return _Action('soon', head + f'stock lasts {_weeks(cover)}.')
+
+
+def _actions(r: WeeklyReport) -> List[_Action]:
+    found = [a for a in map(_festival_action, r.playbook) if a]
+    found += [_reorder_action(line) for line in r.reorder]
+    if r.reminder_count:
+        found.append(_Action('info', reminder_text(r.reminder_count)))
+    found += [_Action('info', festival_reminder_line(f, n))
+              for f, n in r.festival_reminder_counts if n > 0]
+    return sorted(found, key=lambda a: _URGENCY_RANK[a.urgency])
+
+
+def _action_row(action: _Action) -> str:
+    return (f'<li class="action" data-urgency="{action.urgency}">'
+            f'<span class="pill {action.urgency}">{_PILL_WORD[action.urgency]}</span>'
+            f'<span class="action-text">{_esc(action.text)}</span></li>')
+
+
+def _actions_body(r: WeeklyReport) -> str:
+    found = _actions(r)
+    if not found:
+        text = 'Nothing urgent this week.'
+        if r.reorder_status == 'no_stock_sheet':
+            text += ' Reorder advice is off until the Stock &amp; Orders sheet is added.'
+        return f'<p class="quiet">{text}</p>'
+    rows = ''.join(_action_row(a) for a in found[:MAX_ACTIONS])
+    more = len(found) - MAX_ACTIONS
+    tail = (f'<p class="note">{more} more in the sections below.</p>'
+            if more > 0 else '')
+    return f'<ul class="actions">{rows}</ul>{tail}'
+
+
+# --- sales: what changed? -------------------------------------------------------
 
 def _bar(index: int, week, value: float, top: float, slot: float, latest: bool) -> str:
     width = min(MAX_BAR_WIDTH, max(slot - BAR_GAP, 1))
@@ -179,25 +223,57 @@ def _chart_labels(values: list, top: float, slot: float) -> str:
     return ''.join(labels)
 
 
-def _sales_chart(series: pd.DataFrame) -> str:
+def _usual_line(usual: Optional[float], top: float) -> str:
+    """A dashed line at a usual week's sales, so each bar reads as above or below."""
+    if not usual or usual <= 0:
+        return ''
+    y = PLOT_HEIGHT - usual / top * (PLOT_HEIGHT - LABEL_ROOM)
+    return (f'<line class="usual" data-usual-week="{usual:.0f}" x1="0" '
+            f'x2="{CHART_WIDTH}" y1="{y:.1f}" y2="{y:.1f}"/>'
+            f'<text class="usual-label" x="2" y="{y - 3:.1f}">'
+            f'usual {_esc(money(usual))}</text>')
+
+
+def _four_week_line(series: pd.DataFrame) -> str:
+    """The last 4 weeks against the 4 before, in words; empty if it cannot be said."""
+    if len(series) < 2 * RECENT_WEEKS:
+        return ''
+    sales = series['sales'].astype(float)
+    recent = float(sales.iloc[-RECENT_WEEKS:].sum())
+    before = float(sales.iloc[-2 * RECENT_WEEKS:-RECENT_WEEKS].sum())
+    if before <= 0:
+        return ''
+    change = (recent - before) / before
+    if round(abs(change) * 100) == 0:
+        move = 'about the same as'
+    else:
+        move = f'{"up" if change > 0 else "down"} {abs(change) * 100:.0f}% on'
+    return (f'<p class="change">Last {RECENT_WEEKS} weeks: {_esc(money(recent))}, '
+            f'{move} the {RECENT_WEEKS} weeks before.</p>')
+
+
+def _sales_chart(series: pd.DataFrame, usual: Optional[float]) -> str:
     count = len(series)
     if count == 0:
         return '<p>No sales to chart yet.</p>'
     values = [float(v) for v in series['sales']]
     slot = CHART_WIDTH / count
-    top = max(max(values), 1.0)
+    top = max(max(values), usual or 0.0, 1.0)
     bars = ''.join(
         _bar(i, week, value, top, slot, latest=i == count - 1)
-        for i, (week, value) in enumerate(zip(series.index, values))
+        for i, (week, value) in enumerate(zip(series.index, values, strict=True))
     )
     label = f'Weekly sales for the last {count} weeks, best week {money(max(values))}'
     return (
+        f'{_four_week_line(series)}'
         f'<svg viewBox="0 0 {CHART_WIDTH} {CHART_HEIGHT}" role="img" '
         f'aria-label="{_esc(label)}">{bars}'
         f'<line class="axis" x1="0" x2="{CHART_WIDTH}" y1="{PLOT_HEIGHT}" '
-        f'y2="{PLOT_HEIGHT}"/>{_month_ticks(pd.DatetimeIndex(series.index), slot)}'
+        f'y2="{PLOT_HEIGHT}"/>{_usual_line(usual, top)}'
+        f'{_month_ticks(pd.DatetimeIndex(series.index), slot)}'
         f'{_chart_labels(values, top, slot)}</svg>'
-        '<p class="note">One bar per week. The amber bar is the last 7 days.</p>'
+        '<p class="note">One bar per week. The amber bar is the last 7 days; '
+        'the dashed line is a usual week.</p>'
         f'{_table_view(series)}'
     )
 
@@ -216,9 +292,7 @@ def _table_view(series: pd.DataFrame) -> str:
     )
 
 
-def _cover_weeks(line: ReorderLine) -> Optional[float]:
-    return line.stock_now / line.units_per_week if line.units_per_week > 0 else None
-
+# --- reorder: stock cover against shipment time -----------------------------------
 
 def _meter(cover: float, lead: int) -> str:
     scale = max(cover, lead) * METER_HEADROOM or 1.0
@@ -228,11 +302,6 @@ def _meter(cover: float, lead: int) -> str:
         f'style="width:{cover / scale * 100:.0f}%"></div>'
         f'<div class="meter-mark" style="left:{lead / scale * 100:.0f}%"></div></div>'
     )
-
-
-def _weeks(count: float) -> str:
-    whole = round(count)
-    return f'{whole} week' if whole == 1 else f'{whole} weeks'
 
 
 def _order_text(line: ReorderLine, cover: Optional[float]) -> str:
@@ -275,6 +344,91 @@ def _reorder(r: WeeklyReport) -> str:
     return f'<ul>{"".join(_order_row(line) for line in r.reorder)}</ul>{note}'
 
 
+# --- festival cards ---------------------------------------------------------------
+
+def _stage_advice(item: PlaybookItem) -> str:
+    by = f'{item.order_by:%d %b}'
+    return {
+        'later': f'Order by {by}.',
+        'order_soon': f'Order by {by}.',
+        'order_now': f'Order now. The order-by date was {by}.',
+        'preview': ('Too late to order a shipment in time. Sell what is in stock '
+                    'and tell regulars what is coming.'),
+        'on_now': 'On now. Keep an eye on stock and promote the best sellers.',
+        'clearance': 'Just finished. Sell down leftover stock over the next two weeks.',
+    }[item.stage]
+
+
+def _lead_note(item: PlaybookItem) -> str:
+    text = f'A shipment takes {_weeks(item.lead_weeks)}'
+    if item.lead_assumed:
+        text += ' (an assumption: add your real time to the Stock &amp; Orders sheet)'
+    return f'<p class="note">{text}.</p>'
+
+
+def _lifts(item: PlaybookItem) -> str:
+    if not item.lifts:
+        return ''
+    parts = ', '.join(
+        f'{_esc(lift.category)} about {lift.uplift:.1f}x '
+        f'({lift.confidence}, {lift.windows} past years)' for lift in item.lifts)
+    return f'<p>Usually sells faster: {parts}.</p>'
+
+
+def _range_bar(plan: CashPlan) -> str:
+    if plan.low is None or plan.high is None:
+        return ''
+    scale = plan.high * RANGE_HEADROOM or 1.0
+    left, width = plan.low / scale * 100, (plan.high - plan.low) / scale * 100
+    mark = plan.expected / scale * 100
+    return (f'<div class="range" data-range-low="{plan.low:.0f}" '
+            f'data-range-high="{plan.high:.0f}"><div class="band" '
+            f'style="left:{left:.1f}%;width:{width:.1f}%"></div>'
+            f'<div class="mark" style="left:{mark:.1f}%"></div></div>')
+
+
+def _budget_text(plan: CashPlan) -> str:
+    if plan.budget_expected is None:
+        return ''
+    if plan.budget_low is None:
+        return f' A stock budget at that level is about {money(plan.budget_expected)}.'
+    return (f' A cautious stock budget is about {money(plan.budget_low)} '
+            f'to {money(plan.budget_expected)}.')
+
+
+def _cash_block(plan: CashPlan) -> str:
+    text = f'Expected sales about {money(plan.expected)}'
+    if plan.low is not None and plan.high is not None:
+        text += (f', likely {money(plan.low)} to {money(plan.high)} '
+                 f'(from {plan.backtest_windows} past festivals).')
+    else:
+        text += ' (not enough history for a range).'
+    return (f'<div class="cash" data-expected="{plan.expected:.0f}">'
+            f'<p>{_esc(text + _budget_text(plan))}</p>{_range_bar(plan)}</div>')
+
+
+def _festival_card(item: PlaybookItem) -> str:
+    tone = _STAGE_TONE.get(item.stage, 'info')
+    cash = _cash_block(item.cash) if item.cash else ''
+    return (
+        f'<article class="card" data-festival="{_esc(item.festival)}">'
+        f'<div class="card-head"><h3>{_esc(item.festival)}</h3>'
+        f'<span class="pill {tone}">{_STAGE_WORD[item.stage]}</span></div>'
+        f'<p class="card-dates">{item.start:%d %b} to {item.end:%d %b}</p>'
+        f'<p>{_esc(_stage_advice(item))}</p>{_lead_note(item)}{_lifts(item)}{cash}'
+        '</article>'
+    )
+
+
+def _playbook(r: WeeklyReport) -> str:
+    if not r.playbook:
+        return ''
+    cards = ''.join(_festival_card(item) for item in r.playbook)
+    return f'{cards}<p class="note">{_esc(PLAYBOOK_FOOTER)}</p>'
+
+
+# --- customers, money and the data footer ----------------------------------------
+
 def _profit_rows(lines: Iterable[MoneyLine]) -> str:
     lines = list(lines)
     if not lines:
@@ -298,13 +452,6 @@ def _list(items: Iterable[str]) -> str:
     return f'<ul class="plain">{entries}</ul>' if entries else ''
 
 
-def _playbook(r: WeeklyReport) -> str:
-    if not r.playbook:
-        return ''
-    items = _list(item.text for item in r.playbook)
-    return f'{items}<p class="note">{_esc(PLAYBOOK_FOOTER)}</p>'
-
-
 def _reminders(r: WeeklyReport) -> str:
     if r.reminder_count is None:
         return ''
@@ -313,34 +460,56 @@ def _reminders(r: WeeklyReport) -> str:
     return f'<p>{_esc(reminder_text(r.reminder_count))}</p>{festivals}'
 
 
-def _section(title: str, body: str) -> str:
-    return f'<section><h2>{_esc(title)}</h2>{body}</section>' if body else ''
+def _data_checks(r: WeeklyReport) -> str:
+    if not r.data_notes:
+        return ''
+    return (f'<section id="data"><details><summary>Data checks '
+            f'({len(r.data_notes)})</summary>{_list(r.data_notes)}</details></section>')
 
 
 def _banner(r: WeeklyReport) -> str:
     return f'<p class="banner">{_esc(UNTRUSTED_BANNER)}</p>' if not r.trusted else ''
 
 
+def _section(anchor: str, title: str, body: str) -> str:
+    if not body:
+        return ''
+    return f'<section id="{anchor}"><h2>{_esc(title)}</h2>{body}</section>'
+
+
+def _jump_links(sections: List[Tuple[str, str, str]]) -> str:
+    """Anchors to the main sections that are on the page: (anchor, label, body)."""
+    links = ''.join(f'<a href="#{anchor}">{label}</a>'
+                    for anchor, label, body in sections if body)
+    return f'<nav class="jump" aria-label="Jump to a section">{links}</nav>'
+
+
 def render_dashboard(r: WeeklyReport, series: pd.DataFrame) -> str:
     """The whole dashboard as one self-contained HTML string."""
     earners = (*r.top_earners, *r.small_earners)
+    main = [
+        ('actions', 'Actions', 'Do this week', _actions_body(r)),
+        ('sales', 'Sales', 'How sales are going', _sales_chart(series, r.usual_week_sales)),
+        ('reorder', 'Reorder', 'Reorder this week', _reorder(r)),
+        ('festivals', 'Festivals', 'Festival playbook', _playbook(r)),
+        ('customers', 'Customers', 'Customers to nudge', _reminders(r)),
+        ('money', 'Money', 'Profit by product (last 12 months)', _profit_rows(earners)),
+    ]
+    sections = ''.join(_section(anchor, title, body) for anchor, _, title, body in main)
     body = ''.join([
         '<h1>Boutique dashboard</h1>',
         f'<p class="when">Data through {_esc(f"{r.data_through:%a %d %b %Y}")}</p>',
         _banner(r),
-        f'<div class="hero">{_hero(r)}</div>',
-        _section('Weekly sales', _sales_chart(series)),
-        _section('Reorder this week', _reorder(r)),
-        _section('Festival playbook', _playbook(r)),
-        _section('Customers to nudge', _reminders(r)),
-        _section('Profit by product (last 12 months)', _profit_rows(earners)),
-        _section('Mix and channels (last 12 months)', _list(r.mix_notes)),
-        _section('Things to check in the data', _list(r.data_notes)),
+        _jump_links([(anchor, label, text) for anchor, label, _, text in main]),
+        _tiles(r),
+        sections,
+        _section('mix', 'Mix and channels (last 12 months)', _list(r.mix_notes)),
+        _data_checks(r),
     ])
     return (
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
-        f'<title>Boutique dashboard</title><style>{_CSS}</style></head>'
+        f'<title>Boutique dashboard</title><style>{CSS}</style></head>'
         f'<body><div class="paar" aria-hidden="true"></div><main>{body}</main>'
         '</body></html>'
     )
