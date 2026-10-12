@@ -146,6 +146,43 @@ and the full tables are in [docs/decisions.md](docs/decisions.md).
   time. The outcome tracking that will measure it (forecast coverage and the
   reminder holdout) is built, but needs festivals to pass first.
 
+## Case study: can the reorder advice be trusted?
+
+**Question.** A boutique that orders stock weeks ahead needs to know how much
+of each product will sell. Is the simple rule I started with good enough, and
+if not, what is?
+
+**Data.** The owner's real ledger: 4,993 sales rows, 15 products, 2015 to 2026.
+Demand is intermittent (most products sell a few units a week), and stock-outs
+and a lockdown make some weeks misleading, so those weeks are left out of every
+score.
+
+**Method.** Every claim was tested the same way: pretend it is a past week,
+give the method only the history before it, and compare with what really sold.
+Four tests, each recorded in [docs/decisions.md](docs/decisions.md):
+
+1. The original rule (average of the last 13 weeks) beat two simple
+   alternatives, so it stayed (ADR 1).
+2. A gradient-boosting model trained across products then beat that rule:
+   59.1% against 66.9% error at 4 weeks, and 48.6% against 60.5% at 7 weeks
+   (ADR 6).
+3. A newsvendor model for order quantities tied the existing buffer rule and
+   spent more, so it was built, benchmarked and **not shipped** (ADR 5).
+4. Scored as order targets, the model reached the old rule's fill rate with
+   about a quarter fewer leftover units. Applying the festival factor on top
+   of it made it worse, because the model already learns festival weeks, so
+   the factor is dropped when the model is used (ADR 7).
+
+**What shipped.** The weekly reorder advice uses the model, falls back to the
+old rule if scikit-learn or history is missing, and labels which method made
+each recommendation in the decision log.
+
+**What is not known.** Whether following the advice changed sales, waste or
+time spent, and the dollar value of fewer leftovers (it depends on resale
+value, which is unknown). One shop, 15 products, settings chosen once. The
+reorder advice also needs the owner to fill in a stock sheet before it shows
+anything. Outcome tracking is built to measure this as festivals pass.
+
 ## Project layout
 
 ```
