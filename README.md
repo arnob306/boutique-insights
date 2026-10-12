@@ -112,9 +112,12 @@ already on order.
   Puja). Upcoming dates come from `config/festivals.yaml`; check them, because
   several festivals follow the lunar calendar.
 - **Reorder suggestion** estimates demand over the shipment time plus a week,
-  scaled for any festival in that period, adds a safety buffer, and subtracts
-  stock on hand and stock already on order. Products with few recent sales are
-  marked as rough guesses.
+  adds a safety buffer, and subtracts stock on hand and stock already on order.
+  The estimate comes from a gradient-boosting model trained on the shop's own
+  history (which already learns festival weeks). If scikit-learn is missing, or
+  there is under two years of history, it falls back to the last 13 weeks'
+  average scaled for any festival in that period. Products with few recent sales
+  are marked as rough guesses.
 
 ## Results
 
@@ -124,10 +127,11 @@ and the full tables are in [docs/decisions.md](docs/decisions.md).
 
 - **Reorder forecast.** Over 1,588 rolling 4-week windows the live rule had 66.9%
   error (WAPE), against 68.8% and 75.0% for two simple alternatives. A
-  gradient-boosting model trained across products (an optional challenger, not
-  in the weekly report) did better: 59.1% at 4 weeks and 48.6% against 60.5%
-  over 898 seven-week windows. Moving the weekly report onto it is an open
-  decision.
+  gradient-boosting model trained across products did better: 59.1% at 4 weeks
+  and 48.6% against 60.5% over 898 seven-week windows. The weekly reorder advice
+  now uses it. Scored as order targets, it reached the old rule's fill rate with
+  about a quarter fewer leftover units, and adding the festival factor on top of
+  it made it worse, so the factor is dropped when the model is used (ADR 7).
 - **Order quantities.** A newsvendor model that picks a quantity per product
   tied the existing buffer rule on 46 past festivals at plausible leftover
   values and spent more, so it was benchmarked and not shipped.

@@ -12,7 +12,7 @@ This exists to test whether a heavier model beats the live velocity rule. It
 is not used in the weekly report.
 """
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -86,17 +86,15 @@ def training_rows(units: np.ndarray, observed: np.ndarray, starts: pd.DatetimeIn
     return pd.concat(frames), np.concatenate(targets)
 
 
-def gradient_boosting(units: np.ndarray, observed: np.ndarray, starts: pd.DatetimeIndex,
-                      horizon: int) -> np.ndarray:
-    """Expected units over the next ``horizon`` weeks, one value per product.
+def trained_forecast(units: np.ndarray, observed: np.ndarray, starts: pd.DatetimeIndex,
+                     horizon: int) -> Optional[np.ndarray]:
+    """Model forecast per product, or None when there is too little history to train on.
 
-    Falls back to the live velocity rule when there is too little history to
-    train on.
+    Raises ImportError if scikit-learn is not installed.
     """
     rows, targets = training_rows(units, observed, starts, horizon)
     if len(targets) < MIN_TRAIN_ROWS:
-        return np.array([velocity_rule(units[:, i], observed[:, i], horizon)
-                         for i in range(units.shape[1])])
+        return None
     from sklearn.ensemble import HistGradientBoostingRegressor
     model = HistGradientBoostingRegressor(
         loss='poisson', max_iter=150, learning_rate=0.05, max_depth=3,
@@ -105,6 +103,20 @@ def gradient_boosting(units: np.ndarray, observed: np.ndarray, starts: pd.Dateti
     now = _features_at(units, observed, len(units), starts[-1] + pd.Timedelta(days=7),
                        horizon)
     return np.clip(model.predict(now.to_numpy(float)), 0.0, None)
+
+
+def gradient_boosting(units: np.ndarray, observed: np.ndarray, starts: pd.DatetimeIndex,
+                      horizon: int) -> np.ndarray:
+    """Expected units over the next ``horizon`` weeks, one value per product.
+
+    Falls back to the live velocity rule when there is too little history to
+    train on.
+    """
+    forecast = trained_forecast(units, observed, starts, horizon)
+    if forecast is not None:
+        return forecast
+    return np.array([velocity_rule(units[:, i], observed[:, i], horizon)
+                     for i in range(units.shape[1])])
 
 
 PANEL_METHODS: Dict[str, PanelMethod] = {'gradient boosting': gradient_boosting}

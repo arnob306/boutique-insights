@@ -234,3 +234,52 @@ change, tested on its own.
 **Consequences.** ADR 1 stands for what it measured (the three simple rules)
 but its conclusion that no heavier model was needed is superseded. It is
 still not shown that following the better forecast would raise profit.
+
+## 7. The reorder advice uses the model, without the festival factor
+
+**Context.** ADR 6 left open whether better unit forecasts mean better orders,
+and whether the festival factor should still be applied on top of the model.
+
+**What was tested.** For every product and origin (a step of 4 weeks, after two
+years of history), the order-up-to target was the forecast plus the safety
+buffer, as the live code builds it, compared with what sold over the next
+lead-time-plus-a-week. Four variants: the live rule (velocity times festival
+factor), velocity alone, the model alone, and the model times the festival
+factor. Windows with a stock-out or lockdown were left out. Festival windows
+were found from the history's own labels, and the factor used only uplifts
+learned before each origin.
+
+**Result** (real ledger, 4-week shipment, 1,588 windows, aggregates only):
+
+| Target | WAPE | Fill rate | Leftover units | Units ordered |
+|---|---|---|---|---|
+| Live rule | 68.6% | 91.1% | 5,682 | 10,893 |
+| Velocity, no factor | 63.7% | 86.0% | 4,378 | 9,297 |
+| Model alone | 54.4% | 90.2% | 4,151 | 9,311 |
+| Model times factor | 67.1% | 93.9% | 5,996 | 11,368 |
+
+Adding the factor to the model made it worse in festival windows (WAPE 54.0%
+to 72.2%, bias to +1.7 units), so the model already captures festivals and the
+factor counted them twice. The same held at 2 and 6 weeks. Sweeping the
+buffer, the model reached the live rule's 93.6% fill with 24% fewer leftover
+units (5,399 against 7,063) and 13% fewer units ordered (10,754 against
+12,420).
+
+**Decision.** When the model is available the weekly advice uses its forecast
+for lead time plus a week, with the same safety buffer and no festival factor.
+The festival is still named in the note. The rule is the fallback for a product
+the model does not cover, for too little history (under 104 weeks), and when
+scikit-learn is not installed. The report never fails because of the model.
+Each reorder row carries `rule` or `model`, and the decision log records
+`reorder-v1` or `reorder-gbm-v1` so the two can be compared later.
+
+**Caveats.**
+- Targets, not orders. The stock sheet is empty, so stock on hand, minimum
+  orders and in-transit stock are not modelled in the backtest.
+- Units, not dollars. Leftover cost depends on resale value, which is unknown.
+- One shop, and the model settings were chosen once, not tuned. The buffer
+  sweep was run after seeing the first result.
+- Moving lunar festivals may be less well captured than fixed ones. Not
+  separated out.
+- Retraining each week costs a few seconds and the choice is deterministic
+  (fixed seed). Nothing measures yet whether following the advice helps.

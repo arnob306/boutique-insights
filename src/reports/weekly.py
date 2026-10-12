@@ -15,6 +15,7 @@ import pandas as pd
 from src.adapters.boutique_xlsx import WorkbookData
 from src.metrics.cashplan import build_cash_plan
 from src.metrics.mix import category_mix, channel_mix, mix_notes
+from src.forecast.live import model_forecaster
 from src.metrics.patterns import festival_uplift
 from src.metrics.products import product_performance
 from src.metrics.reorder import reorder_suggestions
@@ -123,7 +124,8 @@ def _reorder_lines(data, as_of, calendar, uplift):
     if data.stock is None:
         return (), 'no_stock_sheet'
     suggestions = reorder_suggestions(
-        data.sales, data.stock, as_of, calendar=calendar, uplift=uplift)
+        data.sales, data.stock, as_of, calendar=calendar, uplift=uplift,
+        forecaster=model_forecaster(data.sales, as_of))
     needed = suggestions[suggestions['order_qty'] > 0].head(MAX_REORDER_LINES)
     lines = tuple(
         ReorderLine(r.product, int(r.order_qty), int(r.stock_now),

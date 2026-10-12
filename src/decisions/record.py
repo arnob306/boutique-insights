@@ -16,12 +16,14 @@ import pandas as pd
 
 from src.adapters.boutique_xlsx import WorkbookData
 from src.decisions.store import Recommendation, add_recommendations, open_log
+from src.forecast.live import model_forecaster
 from src.metrics.patterns import festival_uplift
-from src.metrics.reorder import confidence_label, reorder_suggestions
+from src.metrics.reorder import MODEL_BASIS, confidence_label, reorder_suggestions
 from src.metrics.velocity import weekly_velocity
 
 FORECAST_MODEL = 'velocity-v1'
 REORDER_MODEL = 'reorder-v1'
+MODEL_REORDER_MODEL = 'reorder-gbm-v1'
 FORECAST_HORIZON_WEEKS = 4
 
 
@@ -45,11 +47,13 @@ def _reorder_rows(
         return []
     suggestions = reorder_suggestions(
         data.sales, data.stock, as_of, calendar=calendar,
-        uplift=festival_uplift(data.sales))
+        uplift=festival_uplift(data.sales),
+        forecaster=model_forecaster(data.sales, as_of))
     return [
         Recommendation(
             as_of=as_of.date(), product=str(row['product']), kind='reorder',
-            model=REORDER_MODEL, horizon_weeks=int(row['lead_weeks']) + 1,
+            model=MODEL_REORDER_MODEL if row['basis'] == MODEL_BASIS else REORDER_MODEL,
+            horizon_weeks=int(row['lead_weeks']) + 1,
             suggested_qty=int(row['order_qty']),
             expected_demand=float(row['expected_demand']),
             confidence=str(row['confidence']))

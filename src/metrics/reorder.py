@@ -9,7 +9,7 @@ instead of pretending to be precise.
 """
 
 import math
-from typing import Optional
+from typing import Callable, Dict, Optional
 
 import pandas as pd
 
@@ -21,10 +21,17 @@ SAFETY_Z = 1.0
 LOW_CONFIDENCE_BELOW = 6
 GOOD_CONFIDENCE_FROM = 15
 
+# Where a product's expected demand came from.
+RULE_BASIS = 'rule'
+MODEL_BASIS = 'model'
+
+# Weeks ahead -> expected units per product, or None if it cannot say.
+Forecaster = Callable[[int], Optional[Dict[str, float]]]
+
 COLUMNS = [
     'product', 'stock_now', 'on_order', 'units_per_week', 'weeks_of_cover', 'lead_weeks',
     'expected_demand', 'safety_stock', 'target', 'order_qty', 'confidence',
-    'note',
+    'note', 'basis',
 ]
 
 
@@ -61,7 +68,8 @@ def _festival_factor(calendar, uplift, category, as_of, horizon_days):
     return factor, notes
 
 
-def _suggest(row, sales, velocity, categories, calendar, uplift, as_of) -> dict:
+def _suggest(row, sales, velocity, categories, calendar, uplift, as_of,
+             model_units) -> dict:
     product = row.product
     vel = velocity.loc[product] if product in velocity.index else None
     per_week = float(vel['units_per_week']) if vel is not None else 0.0
@@ -73,6 +81,7 @@ def _suggest(row, sales, velocity, categories, calendar, uplift, as_of) -> dict:
         'units_per_week': per_week,
         'lead_weeks': int(row.weeks_to_arrive),
         'confidence': confidence_label(sales_count),
+        'basis': RULE_BASIS,
     }
     if not per_week > 0:
         return {**base, 'weeks_of_cover': math.inf, 'expected_demand': 0.0,
@@ -82,7 +91,13 @@ def _suggest(row, sales, velocity, categories, calendar, uplift, as_of) -> dict:
     horizon = int(row.weeks_to_arrive) * 7 + REVIEW_DAYS
     factor, notes = _festival_factor(
         calendar, uplift, categories.get(product), as_of, horizon)
-    expected = per_week / 7 * horizon * factor
+    modelled = model_units(horizon // 7).get(product)
+    if modelled is None:
+        expected = per_week / 7 * horizon * factor
+    else:
+        # The model already learns festival weeks, so scaling it again would count them twice.
+        expected = modelled
+        base['basis'] = MODEL_BASIS
     safety = math.ceil(SAFETY_Z * math.sqrt(expected))
     target = expected + safety
     need = max(0, math.ceil(target - stock_now - on_order - 1e-9))
@@ -100,15 +115,29 @@ def reorder_suggestions(
     calendar=(),
     uplift: Optional[pd.DataFrame] = None,
     weeks: int = DEFAULT_WEEKS,
+    forecaster: Optional[Forecaster] = None,
 ) -> pd.DataFrame:
-    """Return one row per stocked product, biggest orders first."""
+    """Return one row per stocked product, biggest orders first.
+
+    With a ``forecaster`` (weeks ahead to units per product), products it
+    covers use that forecast and no festival factor; the rest use the rule.
+    """
     if stock is None or stock.empty:
         return pd.DataFrame(columns=COLUMNS)
     as_of = pd.Timestamp(as_of).normalize()
     velocity = weekly_velocity(sales, as_of, weeks)
     categories = sales.drop_duplicates('product').set_index('product')['category']
+    asked: Dict[int, Dict[str, float]] = {}
+
+    def model_units(horizon_weeks: int) -> Dict[str, float]:
+        if forecaster is None:
+            return {}
+        if horizon_weeks not in asked:
+            asked[horizon_weeks] = forecaster(horizon_weeks) or {}
+        return asked[horizon_weeks]
+
     rows = [
-        _suggest(row, sales, velocity, categories, calendar, uplift, as_of)
+        _suggest(row, sales, velocity, categories, calendar, uplift, as_of, model_units)
         for row in stock.itertuples()
     ]
     result = pd.DataFrame(rows, columns=COLUMNS)

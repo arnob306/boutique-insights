@@ -3,7 +3,7 @@ pandas>=2.0.0
 numpy>=1.24.0
 openpyxl>=3.1.0
 
-# Forecast comparison (only the optional --ml challenger uses it)
+# Demand model for the reorder advice (without it the report falls back to a simple rule)
 scikit-learn>=1.3.0
 
 # Configuration

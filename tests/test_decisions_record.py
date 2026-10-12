@@ -6,11 +6,13 @@ from src.adapters.boutique_xlsx import load_workbook_data
 from src.decisions.record import (
     FORECAST_HORIZON_WEEKS,
     FORECAST_MODEL,
+    MODEL_REORDER_MODEL,
     REORDER_MODEL,
     build_recommendations,
     record_week,
 )
 from src.decisions.store import list_recommendations, open_log
+from src.forecast.live import model_forecaster
 from src.metrics.patterns import festival_uplift
 from src.metrics.reorder import reorder_suggestions
 from src.metrics.velocity import weekly_velocity
@@ -53,7 +55,8 @@ def test_one_forecast_per_product_using_recent_velocity(data, as_of):
 def test_reorder_rows_mirror_the_reorder_suggestions(data, as_of):
     recs = _of_kind(build_recommendations(data), 'reorder')
     suggestions = reorder_suggestions(
-        data.sales, data.stock, as_of, calendar=[], uplift=festival_uplift(data.sales))
+        data.sales, data.stock, as_of, calendar=[], uplift=festival_uplift(data.sales),
+        forecaster=model_forecaster(data.sales, as_of))
     assert len(recs) == len(suggestions)
     by_product = {r.product: r for r in recs}
     for row in suggestions.itertuples():
@@ -61,7 +64,20 @@ def test_reorder_rows_mirror_the_reorder_suggestions(data, as_of):
         assert rec.suggested_qty == row.order_qty
         assert rec.expected_demand == pytest.approx(row.expected_demand)
         assert rec.horizon_weeks == row.lead_weeks + 1
-        assert (rec.model, rec.confidence) == (REORDER_MODEL, row.confidence)
+        assert rec.confidence == row.confidence
+        assert rec.model == (MODEL_REORDER_MODEL if row.basis == 'model' else REORDER_MODEL)
+
+
+def test_the_log_says_which_method_made_each_reorder_recommendation(data):
+    models = {r.model for r in _of_kind(build_recommendations(data), 'reorder')}
+    assert models <= {REORDER_MODEL, MODEL_REORDER_MODEL}
+    assert MODEL_REORDER_MODEL != REORDER_MODEL
+
+
+def test_the_log_records_the_rule_when_the_model_is_unavailable(data, monkeypatch):
+    monkeypatch.setattr('src.decisions.record.model_forecaster', lambda sales, as_of: None)
+    models = {r.model for r in _of_kind(build_recommendations(data), 'reorder')}
+    assert models == {REORDER_MODEL}
 
 
 def test_decisions_not_to_order_are_logged_too(data):
