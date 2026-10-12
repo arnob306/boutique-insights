@@ -34,7 +34,7 @@ def confidence_label(sales_count: int) -> str:
     return 'good' if sales_count >= GOOD_CONFIDENCE_FROM else 'medium'
 
 
-def _stock_now(sales, product, on_hand, count_date, as_of) -> int:
+def current_stock(sales, product, on_hand, count_date, as_of) -> int:
     """Stock on the count date, less net sales since (refunds put items back)."""
     since = sales[
         (sales['product'] == product)
@@ -66,7 +66,7 @@ def _suggest(row, sales, velocity, categories, calendar, uplift, as_of) -> dict:
     vel = velocity.loc[product] if product in velocity.index else None
     per_week = float(vel['units_per_week']) if vel is not None else 0.0
     sales_count = int(vel['sales_count']) if vel is not None else 0
-    stock_now = _stock_now(sales, product, row.stock_on_hand, row.count_date, as_of)
+    stock_now = current_stock(sales, product, row.stock_on_hand, row.count_date, as_of)
     on_order = int(getattr(row, 'on_order', 0))
     base = {
         'product': product, 'stock_now': stock_now, 'on_order': on_order,
