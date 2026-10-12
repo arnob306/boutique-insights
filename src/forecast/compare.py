@@ -14,7 +14,7 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
-from src.forecast.methods import METHODS, Method
+from src.forecast.methods import METHODS, Method, PanelMethod
 
 DEFAULT_HORIZON = 4
 DEFAULT_MIN_TRAIN = 104
@@ -42,8 +42,13 @@ def run_comparison(
     horizon: int = DEFAULT_HORIZON,
     min_train: int = DEFAULT_MIN_TRAIN,
     step: int = DEFAULT_STEP,
+    panel_methods: Optional[Dict[str, PanelMethod]] = None,
 ) -> pd.DataFrame:
-    """One row per origin, product and method, with the forecast and the actual."""
+    """One row per origin, product and method, with the forecast and the actual.
+
+    ``panel_methods`` see every product at once (for models trained across
+    products). Like the others they get only the weeks before the origin.
+    """
     _require_at_least_one(horizon=horizon, min_train=min_train, step=step)
     if censored.shape != demand.shape:
         raise ValueError('The censored mask must have the same shape as the demand.')
@@ -54,6 +59,10 @@ def run_comparison(
     rows = []
     for origin in rolling_origins(len(demand), horizon, min_train, step):
         target = slice(origin, origin + horizon)
+        panel = {
+            name: method(units[:origin], observed[:origin],
+                         pd.DatetimeIndex(demand.index[:origin]), horizon)
+            for name, method in (panel_methods or {}).items()}
         for column, product in enumerate(demand.columns):
             history = units[:origin, column]
             seen = observed[:origin, column]
@@ -62,6 +71,9 @@ def run_comparison(
             for name, method in methods.items():
                 rows.append((demand.index[origin], product, name,
                              method(history, seen, horizon), actual, scored))
+            for name, forecasts in panel.items():
+                rows.append((demand.index[origin], product, name,
+                             float(forecasts[column]), actual, scored))
     return pd.DataFrame(rows, columns=RESULT_COLUMNS)
 
 

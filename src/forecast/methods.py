@@ -14,12 +14,18 @@ passed in, so a backtest can hand them just the past.
 from typing import Callable, Dict
 
 import numpy as np
+import pandas as pd
 
 VELOCITY_WEEKS = 13
 RECENT_WEEKS = 8
 SEASON_WEEKS = 52
 
 Method = Callable[[np.ndarray, np.ndarray, int], float]
+
+# A method that sees every product at once: weekly units and which weeks were
+# normal trading (weeks by products), the week each row starts, the horizon.
+# It returns one forecast per product. Used for models trained across products.
+PanelMethod = Callable[[np.ndarray, np.ndarray, pd.DatetimeIndex, int], np.ndarray]
 
 
 def _average_week(history: np.ndarray, observed: np.ndarray, weeks: int) -> float:

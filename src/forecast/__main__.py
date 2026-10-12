@@ -24,6 +24,7 @@ from src.forecast.compare import (
     score,
     score_by_year,
 )
+from src.forecast.ml import PANEL_METHODS
 from src.forecast.series import WEEK_DAYS, censored_weeks, weekly_demand
 
 # Customer IDs are never used or printed here, but the adapter needs a salt.
@@ -53,6 +54,8 @@ def _parse_args(argv) -> argparse.Namespace:
                         help='weeks of history before the first check (default %(default)s)')
     parser.add_argument('--step', type=int, default=DEFAULT_STEP,
                         help='weeks between checks (default %(default)s)')
+    parser.add_argument('--ml', action='store_true',
+                        help='also score a gradient-boosting model (slower)')
     return parser.parse_args(argv)
 
 
@@ -119,7 +122,8 @@ def main(argv=None) -> int:
             data.sales, pd.DatetimeIndex(demand.index), demand.columns)
         results = run_comparison(
             demand, censored, horizon=args.horizon,
-            min_train=args.min_train, step=args.step)
+            min_train=args.min_train, step=args.step,
+            panel_methods=PANEL_METHODS if args.ml else None)
     except (CannotRun, ValueError) as exc:
         _say(f'Cannot run: {exc}')
         return EXIT_INPUT

@@ -90,3 +90,22 @@ def test_nonsense_settings_are_reported_not_a_traceback(workbook_path, capsys, f
     out = capsys.readouterr().out
     assert 'Cannot run' in out
     assert 'Traceback' not in out
+
+
+def test_the_gradient_boosting_challenger_is_scored_only_when_asked_for(
+        workbook_path, capsys):
+    assert run(workbook_path) == 0
+    assert 'gradient boosting' not in capsys.readouterr().out
+    assert run(workbook_path, '--ml') == 0
+    out = capsys.readouterr().out
+    assert 'gradient boosting' in out
+    assert 'velocity rule' in out
+
+
+def test_the_challenger_is_judged_on_the_same_windows_as_the_others(
+        workbook_path, capsys):
+    run(workbook_path, '--ml')
+    lines = [line for line in capsys.readouterr().out.splitlines()
+             if line.startswith(('velocity rule', 'gradient boosting'))]
+    counts = {line.split()[-1] for line in lines[:2]}
+    assert len(counts) == 1
