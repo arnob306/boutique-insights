@@ -123,8 +123,14 @@ Measured on the owner's real ledger (4,993 sales rows, 15 products, 2015 to
 and the full tables are in [docs/decisions.md](docs/decisions.md).
 
 - **Reorder forecast.** Over 1,588 rolling 4-week windows the live rule had 66.9%
-  error (WAPE), against 68.8% and 75.0% for two alternatives. It was already the
-  best of the three, so no heavier model was built.
+  error (WAPE), against 68.8% and 75.0% for two simple alternatives. A
+  gradient-boosting model trained across products (an optional challenger, not
+  in the weekly report) did better: 59.1% at 4 weeks and 48.6% against 60.5%
+  over 898 seven-week windows. Moving the weekly report onto it is an open
+  decision.
+- **Order quantities.** A newsvendor model that picks a quantity per product
+  tied the existing buffer rule on 46 past festivals at plausible leftover
+  values and spent more, so it was benchmarked and not shipped.
 - **Festival sales forecast.** Across 47 past festival windows, forecast from
   six weeks out, "recent daily sales x the festival's usual lift" had 37% error
   and +7% bias, against 50% to 59% for three alternatives. The playbook shows it

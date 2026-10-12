@@ -117,3 +117,120 @@ unless each group has at least 20 customers, and the summary says so plainly.
 upgrade from version 1 (new tables only, tested on a version 1 log that holds
 data). Nothing here shows that the advice raised sales until enough festivals
 have been scored.
+
+## 5. Order quantities by product: built and benchmarked, not shipped as advice
+
+**Context.** The weekly reorder advice adds a flat safety buffer to expected
+demand. The newsvendor idea chooses a quantity from the cost of a missed sale
+(its margin) against the cost of a leftover (cost less what a leftover later
+resells for). It also gives a chance of selling out and an expected leftover,
+which the buffer cannot.
+
+**What was built.** A per-product festival forecast (recent ordinary units
+times the category's usual lift times the days in the window, the cash plan's
+method applied to units), a spread read from past festivals, the quantity,
+netting of stock on hand and on order, the supplier's minimum order, and a trim
+to a budget that drops the least profitable units first. All of it is in
+`src/metrics/ordering*.py` and tested on synthetic data.
+
+**How it was tested.** Every past festival window was run as it would have
+been on its order date, six weeks out, using only data from before that date.
+Four rules were scored on what actually sold: the plain forecast, the forecast
+plus a square-root buffer (the weekly reorder rule's margin), and the
+newsvendor quantity with two ways of reading the spread. Scores are margin on
+what sold less the cost of what was left, in dollars, over 46 windows and 602
+product-festival cases on the owner's real ledger. Stock on the shelf is
+ignored, so this compares the gross need.
+
+| Leftovers resell for | Plain forecast | Forecast + buffer | Newsvendor, pooled spread | Newsvendor, size-matched |
+|---|---|---|---|---|
+| 30% of price | 14,096 (spend 58,508) | 8,627 (86,014) | 10,165 (75,746) | 14,047 (67,826) |
+| 50% of price | 23,048 (58,508) | 25,135 (86,014) | 20,841 (181,976) | 25,108 (115,285) |
+| 70% of price | 25,949 (58,508) | 30,522 (86,014) | 33,900 (288,870) | 33,676 (149,873) |
+
+Share of demand covered: plain 73.3%, buffer 86.1%, pooled newsvendor 83.2% to
+97.2%, size-matched 80.9% to 96.1% (low to high resale).
+
+**What went wrong first.** The first version pooled actual-over-forecast
+ratios across every product and size. It lost to the simpler rules at 30% and
+50% resale and spent about three times as much at 50%. The cause was that the
+spread depends strongly on forecast size: for products forecast under 2 units
+the 80th percentile of actual over forecast was 3.9 (347 cases), for 2 to 6
+units 1.7 (224), for 6 to 15 units 1.0 (87), and for 15 or more 0.5 (14).
+One extra sale is a big ratio on a tiny forecast and a small one on a large
+forecast, so the pooled tail overstocked the big sellers. The second version
+reads each product's spread from the 60 past cases closest in forecast size.
+
+**Decision.** Do not present newsvendor quantities as order advice. At the
+leftover values that are plausible for clothing and jewellery (30% to 50%) the
+size-matched rule ties the existing buffer rule on profit and spends 1.3 to 2
+times as much. It only wins, by about 10%, when leftovers resell for 70%. The
+code stays in the repository as a tested benchmark.
+
+**Caveats.**
+- The resale share is not known. It is the input that decides the result, and
+  it has to come from the owner.
+- 46 windows is small and there are no confidence intervals, so the
+  differences are indicative only.
+- The size-matched version was designed after seeing the pooled result on the
+  same history. Each window is still scored out of sample, but this is not a
+  clean pre-registered test.
+- The scoring model is the rule's own objective (margin against leftover
+  cost). It ignores discounting to clear stock, lost repeat customers and
+  cash-flow timing.
+
+**Consequences.** The weekly reorder rule is unchanged. If the owner gives a
+real resale share and it is high, the comparison can be rerun on the same
+ledger and the decision revisited. Nothing here shows that following any order
+rule changes the shop's profit.
+
+## 6. A gradient-boosting challenger beats the live reorder forecast
+
+**Context.** ADR 1 kept the velocity rule because it was the best of three
+simple methods, and said no heavier model was needed. That compared simple
+rules with each other. It did not test a model trained across products.
+
+**What was tested.** One gradient-boosting model (scikit-learn's
+`HistGradientBoostingRegressor` with a Poisson loss, since the target is a
+count) is trained across all 15 products at each forecast origin. A row is a
+product at a past week. Its features are mean weekly units over the last 4, 13,
+26 and 52 normal trading weeks, units in the same weeks a year earlier, and the
+week of the year (as a sine and cosine). The target is the units over the next
+`horizon` weeks. Rows whose target weeks include a stock-out or lockdown are
+dropped, as they are in scoring. The settings were chosen once before the
+first run and not tuned. It is scored by the same rolling-origin harness as the
+other methods, on the same windows, seeing only weeks before each origin.
+`python -m src.forecast --file <workbook> --ml` reproduces it.
+
+**Result** (the owner's real ledger, 613 weeks, 15 products, aggregates only):
+
+| Horizon | Windows | Gradient boosting | Velocity rule (live) | Recent mean | Seasonal naive |
+|---|---|---|---|---|---|
+| 4 weeks | 1,588 | 59.1% | 66.9% | 68.8% | 75.0% |
+| 7 weeks | 898 | 48.6% | 60.5% | 64.8% | 62.0% |
+
+Figures are WAPE, total forecast error over total units sold, lower is
+better. Bias was close to zero for the challenger at both horizons (-0.1 and
+-0.2 units per window). At the 4-week horizon it had the lowest error in every
+one of the 11 years, narrowest in 2017 (71.6% against 72.4%).
+
+**Decision.** Record the result, keep the weekly report on the velocity rule
+for now, and treat moving it as an open decision. The gain is large enough to
+matter, but using it means the weekly run depends on scikit-learn, retrains
+every week, and needs the model's output wired into the reorder maths (which
+also applies the festival factor and a safety buffer). That should be its own
+change, tested on its own.
+
+**Caveats.**
+- One shop, 15 products, and WAPE is dominated by the biggest sellers.
+- Two runs (two horizons), no confidence intervals.
+- Better forecasts of units do not by themselves mean better orders. The
+  order quantity also depends on lead time, minimum orders and the festival
+  factor, which this comparison does not test.
+- The model has no festival calendar, only the week of the year and last
+  year's same weeks, so lunar festivals that move are not captured directly.
+  That may be room for improvement, and it has not been explored.
+
+**Consequences.** ADR 1 stands for what it measured (the three simple rules)
+but its conclusion that no heavier model was needed is superseded. It is
+still not shown that following the better forecast would raise profit.
