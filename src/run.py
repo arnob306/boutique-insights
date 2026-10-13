@@ -42,6 +42,10 @@ from src.metrics.calendar import DEFAULT_CALENDAR_PATH, load_calendar
 from src.metrics.patterns import festival_windows
 from src.metrics.trends import weekly_series
 from src.privacy import PrivacyError, get_salt
+from src.reminder_messages import (
+    DEFAULT_PATH as MESSAGES_PATH,
+)
+from src.reminder_messages import DEFAULT_TEMPLATES, Templates, load_templates
 from src.reminders import (
     FestivalList,
     Reminders,
@@ -237,10 +241,20 @@ def _with_reminder_counts(report, pack: Optional[ReminderPack]):
             (f.festival, f.count) for f in pack.festivals if f.count > 0))
 
 
+def _message_templates() -> Templates:
+    """Her draft-message wording; a mistake in the file never stops the report."""
+    try:
+        return load_templates(MESSAGES_PATH)
+    except ValueError as exc:
+        _say(f'{exc} Using the built-in wording for now.')
+        return DEFAULT_TEMPLATES
+
+
 def _write_reminders(args, pack: Optional[ReminderPack], today: pd.Timestamp) -> None:
     if pack is None:
         return
-    path = write_reminders(pack.gap, args.private_root / 'output', today, pack.festivals)
+    path = write_reminders(pack.gap, args.private_root / 'output', today, pack.festivals,
+                           _message_templates())
     _say(f'Reminders list written to {path} (it has customer names: keep it local).')
 
 

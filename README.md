@@ -2,7 +2,8 @@
 
 A weekly sales report for a small Bengali clothing and jewellery boutique in
 Melbourne. It reads the shop's Excel sales workbook, checks the data, and
-produces a short plain-English summary (email and a one-page dashboard) that
+produces a short plain-English summary (email and a one-page dashboard), which
+opens with a "Do this week" list of the few things to act on first, and
 answers five questions:
 
 1. **What should I reorder?**
@@ -11,7 +12,9 @@ answers five questions:
    categories usually sell faster, and expected sales for the festival with a
    likely range and a stock budget.
 4. **Which customers should I contact?** Repeat customers due a nudge, and
-   last year's buyers before each festival, in a local file with real names.
+   last year's buyers before each festival, in a local file with real names and
+   a short draft message under each to copy into WhatsApp. The wording is in
+   `config/messages.yaml`, so it can be changed without touching code.
 5. **Where does the money come from?** Category and channel mix, with margin.
 
 It also keeps a decision log (what was recommended, what happened) and has a

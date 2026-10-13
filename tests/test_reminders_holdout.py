@@ -105,6 +105,15 @@ def test_the_file_says_how_many_were_held_back_but_not_who():
     assert held_names and not any(n in text for n in held_names)
 
 
+def test_held_back_customers_get_no_draft_message():
+    result = build(names(60))
+    text = render_reminders(build_reminders(rows([]), TODAY), TODAY, [result])
+    held = [n for n in names(60) if arm_of(n) != SEND]
+    assert held
+    assert text.count('Draft:') == len(result.regulars)
+    assert all(n not in text for n in held)
+
+
 def test_the_file_is_silent_about_holdouts_when_there_is_none():
     customers = names(20)
     result = build(customers, share=None)

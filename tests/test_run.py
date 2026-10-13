@@ -348,6 +348,54 @@ def test_names_stay_out_of_everything_except_the_reminders_file(
     assert 'Customers to nudge' in seen  # the email carries the count
 
 
+def test_the_reminders_file_has_draft_messages(
+        private_root, inbox_file, with_salt):
+    assert _private(private_root, '--reminders') == 0
+    text = _reminder_file(private_root).read_text(encoding='utf-8')
+    assert 'Draft: Hi ' in text
+
+
+def test_draft_messages_stay_out_of_the_email_and_the_dashboard(
+        private_root, inbox_file, with_salt, monkeypatch):
+    for key, value in SMTP_ENV.items():
+        monkeypatch.setenv(key, value)
+    sender = Recorder()
+    assert _private(private_root, '--reminders', '--dashboard', '--send',
+                    sender=sender) == 0
+    seen = ''
+    for path in (private_root / 'output').iterdir():
+        if not path.name.startswith('reminders_'):
+            seen += path.read_text(encoding='utf-8')
+    for part in sender.sent[0].walk():
+        if part.get_content_maintype() == 'text':
+            seen += part.get_content()
+    assert 'Draft:' not in seen
+    assert 'message me and I will help you choose' not in seen
+
+
+def test_her_message_wording_file_is_used(
+        private_root, inbox_file, with_salt, monkeypatch, tmp_path):
+    wording = tmp_path / 'messages.yaml'
+    wording.write_text("nudge: 'Namaskar {first_name}!'\n", encoding='utf-8')
+    monkeypatch.setattr('src.run.MESSAGES_PATH', wording)
+    assert _private(private_root, '--reminders') == 0
+    text = _reminder_file(private_root).read_text(encoding='utf-8')
+    assert 'Draft: Namaskar ' in text
+
+
+def test_a_broken_wording_file_never_stops_the_weekly_report(
+        private_root, inbox_file, with_salt, monkeypatch, tmp_path, capsys):
+    wording = tmp_path / 'messages.yaml'
+    wording.write_text("nudge: 'You spent {spend}.'\n", encoding='utf-8')
+    monkeypatch.setattr('src.run.MESSAGES_PATH', wording)
+    assert _private(private_root, '--reminders') == 0
+    out = capsys.readouterr().out
+    assert 'spend' in out and 'built-in' in out
+    text = _reminder_file(private_root).read_text(encoding='utf-8')
+    assert 'Draft: Hi ' in text
+    assert list((private_root / 'output').glob('weekly_*.txt'))
+
+
 def test_the_report_count_matches_the_list(
         private_root, inbox_file, with_salt, workbook_path):
     expected = _expected_reminders(workbook_path)

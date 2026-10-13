@@ -1,0 +1,11 @@
+# Draft messages for the customers on your reminders list.
+# They appear under each name in the reminders file on your computer, so you can
+# copy one into WhatsApp. Change the wording any time; keep the {curly words}.
+#
+# festival: for customers who shopped at a festival last year.
+#   you can use {first_name}, {festival} and {date}
+# nudge: for repeat customers who have not been in for a while.
+#   you can use {first_name}
+
+festival: "Hi {first_name}, {festival} is coming up on {date}. If you would like anything for it, message me and I will help you choose."
+nudge: "Hi {first_name}, it has been a little while! If you are after something new, message me and I will help you choose."

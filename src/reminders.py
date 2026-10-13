@@ -23,6 +23,12 @@ import pandas as pd
 from src.adapters.boutique_xlsx import SALES_SHEET, SchemaError
 from src.holdout import HOLD, RECENT_BUYER_DAYS, Holdout
 from src.privacy import hash_customer
+from src.reminder_messages import (
+    DEFAULT_TEMPLATES,
+    Templates,
+    festival_message,
+    nudge_message,
+)
 from src.reports.weekly import money
 
 MIN_GAP_DAYS = 30  # so someone who bought last week is not nudged again
@@ -42,6 +48,11 @@ SOURCE_COLUMNS = {
     'Quantity': 'quantity',
     'Sale Total (AUD)': 'amount',
 }
+
+DRAFT_NOTE = (
+    'Under each name is a draft message you can copy into WhatsApp. '
+    'Change the wording in config/messages.yaml.'
+)
 
 PRIVACY_NOTE = (
     "This list has customers' names and buying habits. Keep it on your "
@@ -297,7 +308,11 @@ def _regular_text(r: FestivalRegular) -> str:
     return text + f'. Has bought at this festival {times}.'
 
 
-def _festival_block(item: FestivalList) -> list:
+def _draft(text: str) -> str:
+    return f'  Draft: {text}'
+
+
+def _festival_block(item: FestivalList, templates: Templates) -> list:
     noun = 'customer' if item.count == 1 else 'customers'
     if item.count == 0:
         head = f'{item.festival} starts {item.start:%d %b}. Nobody to contact this time'
@@ -311,10 +326,14 @@ def _festival_block(item: FestivalList) -> list:
     if item.held_back:
         lines.append(f'{item.held_back} held back on purpose, to see fairly whether '
                      'reminders work (not listed).')
-    return lines + [''] + [f'- {_regular_text(r)}' for r in item.regulars] + ['']
+    lines.append('')
+    for r in item.regulars:
+        lines += [f'- {_regular_text(r)}',
+                  _draft(festival_message(templates, r.name, item.festival, item.start))]
+    return lines + ['']
 
 
-def _gap_section(result: Reminders) -> list:
+def _gap_section(result: Reminders, templates: Templates) -> list:
     lines = []
     if result.due_count == 0:
         lines.append('Nobody is due a nudge this week.')
@@ -324,28 +343,34 @@ def _gap_section(result: Reminders) -> list:
         if result.due_count > len(result.due):
             head += f' (the {len(result.due)} who have spent most are listed)'
         lines += [head + '.', '']
-        lines += [f'- {_line_text(line)}' for line in result.due]
+        for line in result.due:
+            lines += [f'- {_line_text(line)}', _draft(nudge_message(templates, line.name))]
     if result.quiet_count:
         lines += ['', f'{result.quiet_count} more have gone quiet (nothing bought for '
                   f'over {LAPSE_FACTOR} times their usual gap) and are not listed.']
     return lines
 
 
-def render_reminders(result: Reminders, today, festival_lists=()) -> str:
-    """The text file she reads."""
+def render_reminders(result: Reminders, today, festival_lists=(),
+                     templates: Templates = DEFAULT_TEMPLATES) -> str:
+    """The text file she reads, with a draft message under each name."""
     today = pd.Timestamp(today)
-    lines = [f'Customers to nudge - {today:%d %b %Y}', PRIVACY_NOTE, '']
+    lines = [f'Customers to nudge - {today:%d %b %Y}', PRIVACY_NOTE]
+    if result.due or any(item.regulars for item in festival_lists):
+        lines.append(DRAFT_NOTE)
+    lines.append('')
     for item in festival_lists:
-        lines += _festival_block(item)
+        lines += _festival_block(item, templates)
     if festival_lists:
         lines += ['Repeat customers due by their usual gap', '']
-    return '\n'.join(lines + _gap_section(result)) + '\n'
+    return '\n'.join(lines + _gap_section(result, templates)) + '\n'
 
 
 def write_reminders(result: Reminders, out_dir: Path, today,
-                    festival_lists=()) -> Path:
+                    festival_lists=(), templates: Templates = DEFAULT_TEMPLATES) -> Path:
     """Write the list to ``out_dir`` and return its path."""
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f'reminders_{pd.Timestamp(today):%Y-%m-%d}.txt'
-    path.write_text(render_reminders(result, today, festival_lists), encoding='utf-8')
+    path.write_text(render_reminders(result, today, festival_lists, templates),
+                    encoding='utf-8')
     return path

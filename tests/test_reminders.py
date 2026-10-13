@@ -3,6 +3,7 @@ import pytest
 
 from src.adapters.boutique_xlsx import SchemaError
 from src.metrics.calendar import FestivalWindow
+from src.reminder_messages import Templates
 from src.reminders import (
     DUE_WINDOW_DAYS,
     FESTIVAL_LIST_DAYS,
@@ -371,6 +372,52 @@ def test_the_festival_text_names_the_festival_and_the_customers():
 def test_the_festival_text_is_left_out_when_there_are_no_lists():
     text = render_reminders(build_reminders(_rows(), TODAY), TODAY, ())
     assert 'last year' not in text.lower()
+
+
+# --- draft messages under each name -----------------------------------------------
+
+def test_each_repeat_customer_gets_a_draft_message_under_their_line():
+    text = render_reminders(_build(*_regular('Asha Test', 80, 30, 2)), TODAY)
+    lines = text.splitlines()
+    at = next(i for i, line in enumerate(lines) if 'Asha Test' in line)
+    assert lines[at + 1].strip().startswith('Draft: Hi Asha,')
+
+
+def test_one_draft_per_listed_customer_and_none_for_the_unlisted():
+    purchases = []
+    for i in range(MAX_LINES + 2):
+        purchases += _regular(f'Person {i:02d} Test', 80, 30, 2)
+    text = render_reminders(_build(*purchases), TODAY)
+    assert text.count('Draft:') == MAX_LINES
+
+
+def test_festival_regulars_get_a_draft_naming_the_festival_and_its_date():
+    lists = _festival_lists([_at(DURGA, 1, 3, 'Asha Test')], [DURGA],
+                            _past_frame(_past(DURGA)))
+    text = render_reminders(build_reminders(_rows(), TODAY), TODAY, lists)
+    assert f'Draft: Hi Asha, Durga Puja is coming up on {DURGA.start:%d %b}' in text
+
+
+def test_the_file_explains_the_drafts_once():
+    text = render_reminders(_build(*_regular('Asha Test', 80, 30, 2)), TODAY)
+    assert text.count('config/messages.yaml') == 1
+
+
+def test_a_nobody_due_file_has_no_drafts():
+    text = render_reminders(_build(('Ben Test', 100, 'Saree', 5.0)), TODAY)
+    assert 'Draft:' not in text
+
+
+def test_her_own_wording_is_used_in_the_file():
+    templates = Templates(festival='F {first_name}', nudge='Namaskar {first_name}!')
+    text = render_reminders(_build(*_regular('Asha Test', 80, 30, 2)), TODAY,
+                            templates=templates)
+    assert 'Draft: Namaskar Asha!' in text
+
+
+def test_the_drafts_are_written_to_the_file(tmp_path):
+    path = write_reminders(_build(*_regular('Asha Test', 80, 30, 2)), tmp_path, TODAY)
+    assert 'Draft: Hi Asha,' in path.read_text(encoding='utf-8')
 
 
 def test_the_festival_lists_are_written_to_the_file(tmp_path):
