@@ -20,12 +20,12 @@ The few in-page jump links are plain anchors (no scripts). The look is in
 """
 
 import html
-from dataclasses import dataclass
 from typing import Iterable, List, Optional, Tuple
 
 import pandas as pd
 
 from src.metrics.cashplan import CashPlan
+from src.reports.actions import Action, build_actions, cover_weeks, weeks_text
 from src.reports.dashboard_style import CSS
 from src.reports.playbook import PLAYBOOK_FOOTER, PlaybookItem
 from src.reports.weekly import (
@@ -55,7 +55,6 @@ METER_HEADROOM = 1.25
 RANGE_HEADROOM = 1.1  # room to the right of a festival's high estimate
 RECENT_WEEKS = 4
 
-_URGENCY_RANK = {'now': 0, 'soon': 1, 'info': 2}
 _PILL_WORD = {'now': 'Now', 'soon': 'Soon', 'info': 'FYI'}
 _STAGE_WORD = {
     'later': 'Later', 'order_soon': 'Order soon', 'order_now': 'Order now',
@@ -64,19 +63,8 @@ _STAGE_WORD = {
 _STAGE_TONE = {'order_now': 'now', 'order_soon': 'soon'}
 
 
-@dataclass(frozen=True)
-class _Action:
-    urgency: str  # now | soon | info
-    text: str
-
-
 def _esc(value: object) -> str:
     return html.escape(str(value))
-
-
-def _weeks(count: float) -> str:
-    whole = round(count)
-    return f'{whole} week' if whole == 1 else f'{whole} weeks'
 
 
 # --- status tiles: is the week healthy? ---------------------------------------
@@ -119,55 +107,14 @@ def _tiles(r: WeeklyReport) -> str:
 
 # --- do this week: what should I do? ----------------------------------------------
 
-def _cover_weeks(line: ReorderLine) -> Optional[float]:
-    return line.stock_now / line.units_per_week if line.units_per_week > 0 else None
-
-
-def _festival_action(item: PlaybookItem) -> Optional[_Action]:
-    name, order_by = item.festival, f'{item.order_by:%d %b}'
-    if item.stage == 'order_now':
-        return _Action('now', f'{name}: order now. The order-by date was {order_by}.')
-    if item.stage == 'order_soon':
-        return _Action('soon', f'{name}: order by {order_by}.')
-    if item.stage == 'preview':
-        return _Action('info', f'{name}: too late to order a shipment in time. '
-                               'Sell what is in stock.')
-    if item.stage == 'on_now':
-        return _Action('info', f'{name} is on. Keep an eye on stock.')
-    return None
-
-
-def _reorder_action(line: ReorderLine) -> _Action:
-    cover = _cover_weeks(line)
-    head = f'Order {line.order_qty} {line.product}: '
-    if cover is None:
-        return _Action('soon', head + 'no recent sales, so treat this as a rough guess.')
-    if cover < line.lead_weeks:
-        # Whole weeks would hide a near miss ("4 weeks, before a 4-week shipment").
-        left = f'{cover:.1f} weeks' if round(cover) >= line.lead_weeks else _weeks(cover)
-        return _Action('now', head + f'stock runs out in {left}, before a '
-                                     f'shipment ({_weeks(line.lead_weeks)}) arrives.')
-    return _Action('soon', head + f'stock lasts {_weeks(cover)}.')
-
-
-def _actions(r: WeeklyReport) -> List[_Action]:
-    found = [a for a in map(_festival_action, r.playbook) if a]
-    found += [_reorder_action(line) for line in r.reorder]
-    if r.reminder_count:
-        found.append(_Action('info', reminder_text(r.reminder_count)))
-    found += [_Action('info', festival_reminder_line(f, n))
-              for f, n in r.festival_reminder_counts if n > 0]
-    return sorted(found, key=lambda a: _URGENCY_RANK[a.urgency])
-
-
-def _action_row(action: _Action) -> str:
+def _action_row(action: Action) -> str:
     return (f'<li class="action" data-urgency="{action.urgency}">'
             f'<span class="pill {action.urgency}">{_PILL_WORD[action.urgency]}</span>'
             f'<span class="action-text">{_esc(action.text)}</span></li>')
 
 
 def _actions_body(r: WeeklyReport) -> str:
-    found = _actions(r)
+    found = build_actions(r)
     if not found:
         text = 'Nothing urgent this week.'
         if r.reorder_status == 'no_stock_sheet':
@@ -308,7 +255,7 @@ def _order_text(line: ReorderLine, cover: Optional[float]) -> str:
     if cover is None:
         return f'{line.stock_now} left and no recent sales.'
     text = (f'{line.stock_now} left, selling about {line.units_per_week:.1f} a week. '
-            f'That lasts {_weeks(cover)}; a shipment takes {_weeks(line.lead_weeks)}.')
+            f'That lasts {weeks_text(cover)}; a shipment takes {weeks_text(line.lead_weeks)}.')
     if line.on_order:
         text += f' {line.on_order} already on order.'
     if line.note:
@@ -319,7 +266,7 @@ def _order_text(line: ReorderLine, cover: Optional[float]) -> str:
 
 
 def _order_row(line: ReorderLine) -> str:
-    cover = _cover_weeks(line)
+    cover = cover_weeks(line)
     attrs = f'data-reorder="{_esc(line.product)}"'
     meter = ''
     if cover is not None:
@@ -360,7 +307,7 @@ def _stage_advice(item: PlaybookItem) -> str:
 
 
 def _lead_note(item: PlaybookItem) -> str:
-    text = f'A shipment takes {_weeks(item.lead_weeks)}'
+    text = f'A shipment takes {weeks_text(item.lead_weeks)}'
     if item.lead_assumed:
         text += ' (an assumption: add your real time to the Stock &amp; Orders sheet)'
     return f'<p class="note">{text}.</p>'

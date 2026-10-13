@@ -19,7 +19,8 @@ from src.forecast.live import model_forecaster
 from src.metrics.patterns import festival_uplift
 from src.metrics.products import product_performance
 from src.metrics.reorder import reorder_suggestions
-from src.reports.formatting import money
+from src.reports.actions import action_line, build_actions
+from src.reports.formatting import festival_reminder_line, money, reminder_text
 from src.reports.playbook import (
     PLAYBOOK_FOOTER,
     PlaybookItem,
@@ -33,6 +34,7 @@ USUAL_WEEKS = 8
 YEAR_SHIFT_DAYS = 364  # same weekday one year earlier
 LOOKBACK_DAYS = 364
 MAX_REORDER_LINES = 8
+MAX_EMAIL_ACTIONS = 3
 TOP_EARNERS = 5
 SMALL_EARNERS = 3
 
@@ -245,26 +247,29 @@ def reorder_bullet(line: ReorderLine) -> str:
     return text
 
 
-def reminder_text(count: int) -> str:
-    """The reminder line for the email and dashboard: how many, never who."""
-    if count == 0:
-        return 'Nobody is due a nudge this week.'
-    noun = 'repeat customer is' if count == 1 else 'repeat customers are'
-    return (f'{count} {noun} due a nudge. The list is saved on your computer, '
-            'not in this email.')
-
-
-def festival_reminder_line(festival: str, count: int) -> str:
-    noun = 'customer' if count == 1 else 'customers'
-    return f'{count} {noun} bought at {festival} last year.'
-
-
 def money_bullet(line: MoneyLine) -> str:
     margin = f', {line.margin * 100:.0f}% margin' if line.margin is not None else ''
     return f'{line.product}: {money(line.profit)} profit{margin}, {line.units_sold} sold.'
 
 
 Section = Tuple[str, Optional[str], Tuple[str, ...]]  # (title, intro, bullets)
+
+
+def _do_this_week(r: WeeklyReport) -> Section:
+    """The few things to act on first, in plain sentences, most urgent first."""
+    found = build_actions(r)
+    if not found:
+        quiet = 'Nothing urgent this week.'
+        if r.reorder_status == 'no_stock_sheet':
+            quiet += (" Reorder advice is off until the 'Stock & Orders' sheet is "
+                      'added to the workbook.')
+        return ('Do this week', quiet, ())
+    shown = found[:MAX_EMAIL_ACTIONS]
+    more = None
+    if len(found) > len(shown):
+        more = (f'The {len(shown)} most urgent of {len(found)}. '
+                'The rest are in the sections below.')
+    return ('Do this week', more, tuple(action_line(a) for a in shown))
 
 
 def _sections(r: WeeklyReport) -> List[Section]:
@@ -282,6 +287,7 @@ def _sections(r: WeeklyReport) -> List[Section]:
     if r.overall_margin is not None:
         money_intro = f'Overall margin over the last 12 months: {r.overall_margin * 100:.0f}%.'
     sections: List[Section] = [
+        _do_this_week(r),
         ('This week', _this_week_text(r), ()),
         ('Reorder this week', reorder[0], reorder[1]),
     ]
