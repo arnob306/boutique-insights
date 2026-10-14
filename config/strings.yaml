@@ -1,0 +1,57 @@
+# The wording of the "Do this week" list.
+#
+# language: en    English only (the default)
+#           both  English first, then the Bengali under each line
+#           bn    Bengali only
+#
+# DRAFT: the Bengali below has NOT been checked by a native speaker yet.
+# Please read it, fix anything that sounds odd, and only then change the
+# setting below to "both". You can try it first without editing this file:
+#   python -m src.run --profile synthetic --language both
+#
+# Each line under "bn:" is one message. Keep the {curly bracket words}
+# exactly as they are (they are filled in by the program, for example
+# {product} becomes the product name). If a line is deleted or has a wrong
+# bracket word, the English wording is used for that line and the program
+# prints a short note about it. Product names and dates stay in English.
+language: en
+
+bn:
+  title.do_this_week: "এই সপ্তাহে যা করতে হবে"
+
+  # The word at the start of each line
+  urgency.now: "এখনই"
+  urgency.soon: "শীঘ্রই"
+  urgency.info: "জেনে রাখুন"
+
+  quiet: "এই সপ্তাহে জরুরি কিছু নেই।"
+  quiet.no_stock_sheet: "ওয়ার্কবুকে 'Stock & Orders' শিট যোগ না করা পর্যন্ত অর্ডারের পরামর্শ বন্ধ আছে।"
+  more: "মোট {total}টির মধ্যে সবচেয়ে জরুরি {shown}টি দেখানো হলো। বাকিগুলো নিচের অংশগুলিতে আছে।"
+  more.dashboard: "আরও {more}টি নিচের অংশগুলিতে আছে।"
+
+  # Festivals
+  festival.order_now: "{festival}: এখনই অর্ডার দিন। অর্ডারের শেষ তারিখ ছিল {order_by}।"
+  festival.order_soon: "{festival}: {order_by} তারিখের মধ্যে অর্ডার দিন।"
+  festival.preview: "{festival}: সময়মতো নতুন মাল আনার সময় আর নেই। যা স্টকে আছে তাই বিক্রি করুন।"
+  festival.on_now: "{festival} চলছে। স্টকের দিকে নজর রাখুন।"
+
+  # Reordering
+  reorder.rough: "{product} {qty}টি অর্ডার দিন: সম্প্রতি বিক্রি কম, তাই এটা আন্দাজের হিসাব।"
+  reorder.runs_out: "{product} {qty}টি অর্ডার দিন: স্টক আর {left} চলবে, অথচ মাল আসতে ({lead}) লাগে।"
+  reorder.lasts: "{product} {qty}টি অর্ডার দিন: স্টক {cover} চলবে।"
+
+  # Counting stock and too much stock
+  recount.products: "আগে এগুলো আবার গুনুন: {products}। এদের স্টকের হিসাব {old} বা তার বেশি পুরনো, তাই অর্ডারের পরামর্শ ঠিক নাও হতে পারে।"
+  recount.sheet: "শেষবার স্টক গোনা হয়েছিল {age} আগে। কয়েকটি জিনিস আবার গুনে শিট আপডেট করুন।"
+  overstock: "{product}: এখনকার বিক্রির হারে স্টক প্রায় {cover} চলবে ({units}টি বাকি)। ছাড় দিয়ে বিক্রি করে টাকা ফিরিয়ে আনার কথা ভাবতে পারেন।"
+
+  # Customers
+  reminder.none: "এই সপ্তাহে কাউকে মনে করানোর দরকার নেই।"
+  reminder.one: "{count} জন নিয়মিত ক্রেতাকে মনে করানোর সময় হয়েছে। তালিকাটি আপনার কম্পিউটারে সেভ করা আছে, এই ইমেইলে নেই।"
+  reminder.many: "{count} জন নিয়মিত ক্রেতাকে মনে করানোর সময় হয়েছে। তালিকাটি আপনার কম্পিউটারে সেভ করা আছে, এই ইমেইলে নেই।"
+  festival_reminder.one: "গত বছর {festival} উপলক্ষে {count} জন ক্রেতা কিনেছিলেন।"
+  festival_reminder.many: "গত বছর {festival} উপলক্ষে {count} জন ক্রেতা কিনেছিলেন।"
+
+  # "3 weeks" (Bengali does not change the word for one or many)
+  weeks.one: "{n} সপ্তাহ"
+  weeks.many: "{n} সপ্তাহ"

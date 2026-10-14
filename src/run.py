@@ -68,6 +68,8 @@ from src.reports.weekly import (
     subject,
 )
 from src.stock_template import write_stock_template
+from src.strings import DEFAULT_PATH as STRINGS_PATH
+from src.strings import ENGLISH, LANGUAGES, Voice, load_languages
 from src.validation.checks import validate_import
 
 logger = logging.getLogger(__name__)
@@ -115,6 +117,9 @@ def _parse_args(argv) -> argparse.Namespace:
                              "each festival's list back on purpose, to test fairly "
                              'whether reminders work. Off by default; agree it with '
                              'the shop owner first')
+    parser.add_argument('--language', choices=LANGUAGES,
+                        help='language of the "Do this week" list: en, bn (Bengali) or '
+                             'both. Overrides config/strings.yaml')
     parser.add_argument('--today', help='override today (YYYY-MM-DD)')
     parser.add_argument('--stock-template', type=Path, metavar='PATH',
                         help='write a blank Stock & Orders sheet and stop')
@@ -271,10 +276,24 @@ def _calendar() -> list:
             if DEFAULT_CALENDAR_PATH.exists() else [])
 
 
-def _build_report(data, today):
+def _voices(language: Optional[str]) -> Tuple[Voice, ...]:
+    """The languages of the "Do this week" list; a mistake in the file never stops
+    the report."""
+    try:
+        found = load_languages(STRINGS_PATH, language)
+    except ValueError as exc:
+        _say(f'{exc} Using English for now.')
+        return (ENGLISH,)
+    for notice in found.notices:
+        _say(notice)
+    return found.voices
+
+
+def _build_report(data, today, voices: Tuple[Voice, ...] = (ENGLISH,)):
     validation = validate_import(data, as_of=today)
     _say(validation.to_text())
-    return build_weekly_report(data, validation, today=today, calendar=_calendar())
+    return build_weekly_report(data, validation, today=today, calendar=_calendar(),
+                               voices=voices)
 
 
 def _decision_log_path(args) -> Optional[Path]:
@@ -360,7 +379,7 @@ def main(argv=None, *, sender=send_email, env_file: Optional[str] = '.env') -> i
         _say(f'Stock template written to {path}')
         return EXIT_OK
 
-    report = _build_report(data, today)
+    report = _build_report(data, today, _voices(args.language))
     report = _with_reminder_counts(report, reminders)
     _write_all(args, report, data.sales)
 

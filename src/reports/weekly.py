@@ -19,8 +19,14 @@ from src.forecast.live import model_forecaster
 from src.metrics.patterns import festival_uplift
 from src.metrics.products import product_performance
 from src.metrics.reorder import reorder_suggestions
-from src.reports.actions import action_line, build_actions
-from src.reports.formatting import festival_reminder_line, money, reminder_text
+from src.reports.actions import (
+    action_lines,
+    build_actions,
+    heading,
+    more_note,
+    quiet_note,
+)
+from src.reports.formatting import festival_reminder_line, html_lines, money, reminder_text
 from src.reports.playbook import (
     PLAYBOOK_FOOTER,
     PlaybookItem,
@@ -33,6 +39,7 @@ from src.reports.stock_signals import (
     recount_products,
     stock_age_days,
 )
+from src.strings import ENGLISH, Voice
 from src.validation.report import ImportReport
 
 WEEK_DAYS = 7
@@ -90,6 +97,7 @@ class WeeklyReport:
     stock_age_days: Optional[int] = None  # days since the newest stock count
     recount: Tuple[str, ...] = ()  # products to order whose own count is old
     overstock: Tuple[OverstockLine, ...] = ()  # far more stock than will sell soon
+    voices: Tuple[Voice, ...] = (ENGLISH,)  # languages of the "Do this week" list
 
 
 # --- building --------------------------------------------------------------
@@ -184,6 +192,7 @@ def build_weekly_report(
     import_report: ImportReport,
     today=None,
     calendar=None,
+    voices: Tuple[Voice, ...] = (ENGLISH,),
 ) -> WeeklyReport:
     """Assemble the figures for the 7 days ending at the newest sale."""
     sales = data.sales
@@ -211,6 +220,7 @@ def build_weekly_report(
         stock_age_days=stock_age_days(data.stock, today),
         recount=recount_products(data.stock, [line.product for line in reorder], today),
         overstock=overstock,
+        voices=voices,
     )
 
 
@@ -272,17 +282,11 @@ def _do_this_week(r: WeeklyReport) -> Section:
     """The few things to act on first, in plain sentences, most urgent first."""
     found = build_actions(r)
     if not found:
-        quiet = 'Nothing urgent this week.'
-        if r.reorder_status == 'no_stock_sheet':
-            quiet += (" Reorder advice is off until the 'Stock & Orders' sheet is "
-                      'added to the workbook.')
-        return ('Do this week', quiet, ())
+        return (heading(r), quiet_note(r), ())
     shown = found[:MAX_EMAIL_ACTIONS]
-    more = None
-    if len(found) > len(shown):
-        more = (f'The {len(shown)} most urgent of {len(found)}. '
-                'The rest are in the sections below.')
-    return ('Do this week', more, tuple(action_line(a) for a in shown))
+    more = more_note(r, len(shown), len(found)) if len(found) > len(shown) else None
+    # A later language goes on its own indented line under the first.
+    return (heading(r), more, tuple('\n  '.join(action_lines(a)) for a in shown))
 
 
 def _sections(r: WeeklyReport) -> List[Section]:
@@ -377,9 +381,10 @@ def render_html(r: WeeklyReport) -> str:
     for title, intro, bullets in _sections(r):
         parts.append(f'<h2 style="font-size:18px;margin:20px 0 6px;">{esc(title)}</h2>')
         if intro:
-            parts.append(f'<p style="margin:0 0 6px;">{esc(intro)}</p>')
+            parts.append(f'<p style="margin:0 0 6px;">{html_lines(intro)}</p>')
         if bullets:
-            items = ''.join(f'<li style="margin-bottom:6px;">{esc(b)}</li>' for b in bullets)
+            items = ''.join(f'<li style="margin-bottom:6px;">{html_lines(b)}</li>'
+                            for b in bullets)
             parts.append(f'<ul style="padding-left:20px;margin:0;">{items}</ul>')
     parts.append('</div>')
     body = '\n'.join(parts)

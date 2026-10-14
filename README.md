@@ -74,6 +74,12 @@ It is a single file with no scripts or external links, built from the same
 figures as the email, so the two cannot disagree. With `--send` the dashboard is attached to the email
 automatically, so she can open it on her phone.
 
+The "Do this week" list can also be shown in Bengali, with the Bengali under
+each English line. It is off by default. The Bengali wording is in
+`config/strings.yaml` and is a draft that a native speaker should read first.
+Preview it with `--language both`, and switch it on for good by setting
+`language: both` in that file (see [docs/decisions.md](docs/decisions.md), ADR 8).
+
 To run it every week on Windows, once the `.env` is filled in, create a
 scheduled task (change the folder to wherever the repo lives):
 
@@ -205,6 +211,8 @@ src/
   run.py        command-line entry point
 docs/decisions.md       why the main design choices were made
 config/festivals.yaml   upcoming festival dates
+config/strings.yaml     Bengali wording and the language setting
+config/messages.yaml    draft WhatsApp message wording
 data/private/           real data (gitignored)
 data/synthetic/         demo workbook
 reports/demo/           demo report

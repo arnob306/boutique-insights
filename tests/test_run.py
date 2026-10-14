@@ -1,3 +1,4 @@
+import re
 import shutil
 from datetime import date
 
@@ -80,6 +81,81 @@ def test_synthetic_profile_writes_a_demo_report(workbook_path, tmp_path):
     html = next(out.glob('weekly_*.html')).read_text(encoding='utf-8')
     assert 'Boutique weekly summary' in html
     assert next(out.glob('weekly_*.txt')).exists()
+
+
+BENGALI = re.compile('[ঀ-৿]')
+
+
+def _synthetic(workbook_path, tmp_path, *extra):
+    out = tmp_path / 'demo'
+    code = _run('--profile', 'synthetic', '--file', str(workbook_path),
+                '--demo-output', str(out), *extra)
+    return code, out
+
+
+def test_the_reports_are_english_unless_bengali_is_switched_on(workbook_path, tmp_path):
+    code, out = _synthetic(workbook_path, tmp_path, '--dashboard')
+    assert code == 0
+    for report in out.glob('*.*'):
+        assert not BENGALI.search(report.read_text(encoding='utf-8')), report.name
+
+
+def test_the_language_flag_puts_bengali_in_every_report_file(workbook_path, tmp_path):
+    code, out = _synthetic(workbook_path, tmp_path, '--dashboard', '--language', 'both')
+    assert code == 0
+    for pattern in ('weekly_*.txt', 'weekly_*.html', 'dashboard_*.html'):
+        text = next(out.glob(pattern)).read_text(encoding='utf-8')
+        assert 'Do this week / ' in text and BENGALI.search(text), pattern
+
+
+def test_the_strings_file_can_switch_bengali_on(
+        workbook_path, tmp_path, monkeypatch):
+    strings = tmp_path / 'strings.yaml'
+    strings.write_text('language: both\nbn:\n  title.do_this_week: "এই সপ্তাহে"\n',
+                       encoding='utf-8')
+    monkeypatch.setattr('src.run.STRINGS_PATH', strings)
+    code, out = _synthetic(workbook_path, tmp_path)
+    assert code == 0
+    assert 'Do this week / এই সপ্তাহে' in next(out.glob('weekly_*.txt')).read_text(
+        encoding='utf-8')
+
+
+def test_a_broken_strings_file_never_stops_the_weekly_report(
+        workbook_path, tmp_path, monkeypatch, capsys):
+    strings = tmp_path / 'strings.yaml'
+    strings.write_text('language: french\n', encoding='utf-8')
+    monkeypatch.setattr('src.run.STRINGS_PATH', strings)
+    code, out = _synthetic(workbook_path, tmp_path)
+    assert code == 0
+    assert 'en, bn or both' in capsys.readouterr().out
+    assert 'Do this week\n' in next(out.glob('weekly_*.txt')).read_text(encoding='utf-8')
+
+
+def test_a_mistake_in_one_bengali_line_is_reported_but_does_not_stop_the_run(
+        workbook_path, tmp_path, monkeypatch, capsys):
+    strings = tmp_path / 'strings.yaml'
+    strings.write_text('language: both\nbn:\n  title.do_this_week: "এই সপ্তাহে"\n'
+                       '  festival.on_now: "{oops} চলছে"\n', encoding='utf-8')
+    monkeypatch.setattr('src.run.STRINGS_PATH', strings)
+    code, _ = _synthetic(workbook_path, tmp_path)
+    assert code == 0
+    assert 'festival.on_now' in capsys.readouterr().out
+
+
+def test_an_unknown_language_is_refused_by_the_command_line(workbook_path, tmp_path):
+    with pytest.raises(SystemExit):
+        _synthetic(workbook_path, tmp_path, '--language', 'french')
+
+
+def test_the_emailed_report_carries_the_bengali_as_utf_8(
+        private_root, inbox_file, with_salt, monkeypatch):
+    for key, value in SMTP_ENV.items():
+        monkeypatch.setenv(key, value)
+    sender = Recorder()
+    assert _private(private_root, '--send', '--language', 'both', sender=sender) == 0
+    plain = sender.sent[0].get_body(('plain',))
+    assert plain.get_content_charset() == 'utf-8'
+    assert BENGALI.search(plain.get_content())
 
 
 def test_private_profile_refuses_to_run_without_a_salt(

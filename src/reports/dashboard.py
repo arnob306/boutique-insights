@@ -25,8 +25,16 @@ from typing import Iterable, List, Optional, Tuple
 import pandas as pd
 
 from src.metrics.cashplan import CashPlan
-from src.reports.actions import Action, build_actions, cover_weeks, weeks_text
+from src.reports.actions import (
+    Action,
+    build_actions,
+    cover_weeks,
+    heading,
+    quiet_note,
+    weeks_text,
+)
 from src.reports.dashboard_style import CSS
+from src.reports.formatting import html_lines
 from src.reports.playbook import PLAYBOOK_FOOTER, PlaybookItem
 from src.reports.weekly import (
     UNTRUSTED_BANNER,
@@ -38,6 +46,7 @@ from src.reports.weekly import (
     money_bullet,
     reminder_text,
 )
+from src.strings import ENGLISH, say_all
 
 WEEKS_SHOWN = 26
 MAX_ACTIONS = 6
@@ -55,7 +64,6 @@ METER_HEADROOM = 1.25
 RANGE_HEADROOM = 1.1  # room to the right of a festival's high estimate
 RECENT_WEEKS = 4
 
-_PILL_WORD = {'now': 'Now', 'soon': 'Soon', 'info': 'FYI'}
 _STAGE_WORD = {
     'later': 'Later', 'order_soon': 'Order soon', 'order_now': 'Order now',
     'preview': 'Too late to order', 'on_now': 'On now', 'clearance': 'Just finished',
@@ -108,22 +116,26 @@ def _tiles(r: WeeklyReport) -> str:
 # --- do this week: what should I do? ----------------------------------------------
 
 def _action_row(action: Action) -> str:
+    """The action, with the same action in any other language under it."""
+    word = action.word or ENGLISH.urgency(action.urgency)
+    lang = '' if action.lang == ENGLISH.code else f' lang="{action.lang}"'
+    others = ''.join(f'<span class="alt" lang="{other.lang}">{_esc(other.text)}</span>'
+                     for other in action.also)
     return (f'<li class="action" data-urgency="{action.urgency}">'
-            f'<span class="pill {action.urgency}">{_PILL_WORD[action.urgency]}</span>'
-            f'<span class="action-text">{_esc(action.text)}</span></li>')
+            f'<span class="pill {action.urgency}">{_esc(word)}</span>'
+            f'<span class="action-text"{lang}>{_esc(action.text)}{others}</span></li>')
 
 
 def _actions_body(r: WeeklyReport) -> str:
     found = build_actions(r)
     if not found:
-        text = 'Nothing urgent this week.'
-        if r.reorder_status == 'no_stock_sheet':
-            text += ' Reorder advice is off until the Stock &amp; Orders sheet is added.'
-        return f'<p class="quiet">{text}</p>'
+        return f'<p class="quiet">{html_lines(quiet_note(r))}</p>'
     rows = ''.join(_action_row(a) for a in found[:MAX_ACTIONS])
     more = len(found) - MAX_ACTIONS
-    tail = (f'<p class="note">{more} more in the sections below.</p>'
-            if more > 0 else '')
+    tail = ''
+    if more > 0:
+        note = say_all(r.voices, 'more.dashboard', more=more)
+        tail = f'<p class="note">{html_lines(note)}</p>'
     return f'<ul class="actions">{rows}</ul>{tail}'
 
 
@@ -435,7 +447,7 @@ def render_dashboard(r: WeeklyReport, series: pd.DataFrame) -> str:
     """The whole dashboard as one self-contained HTML string."""
     earners = (*r.top_earners, *r.small_earners)
     main = [
-        ('actions', 'Actions', 'Do this week', _actions_body(r)),
+        ('actions', 'Actions', heading(r), _actions_body(r)),
         ('sales', 'Sales', 'How sales are going', _sales_chart(series, r.usual_week_sales)),
         ('reorder', 'Reorder', 'Reorder this week', _reorder(r)),
         ('festivals', 'Festivals', 'Festival playbook', _playbook(r)),

@@ -283,3 +283,31 @@ Each reorder row carries `rule` or `model`, and the decision log records
   separated out.
 - Retraining each week costs a few seconds and the choice is deterministic
   (fixed seed). Nothing measures yet whether following the advice helps.
+
+## 8. The "Do this week" list can be read in Bengali
+
+**Context.** The report is for a Bengali-speaking owner who is not at ease with
+English business wording. The action list is the part she reads first, so it is
+the part worth translating.
+
+**Decision.** English wording stays in code (`src/strings.py`) so the report
+always has words. Bengali lives in `config/strings.yaml`, so a native speaker
+can correct it without touching code. A setting chooses English, Bengali or
+both, with the Bengali under each English line. Only the action list, its
+headings and notes are translated; product names, dates and the detail sections
+stay English. Customer messages are not translated: which language a customer
+prefers is not known.
+
+**Safeguards.** A Bengali line that is missing, or whose `{placeholders}` differ
+from the English one, falls back to English for that line and is named in a
+printed notice, so a typo never breaks or corrupts the weekly run. Tests check
+that every English message has a Bengali one with the same placeholders. All
+files are written and emailed as UTF-8.
+
+**Caveats.**
+- The Bengali is a draft written by an AI. It ships switched off
+  (`language: en`) until a native speaker has read it. The tests prove the
+  placeholders are right, not that the Bengali is natural.
+- No runtime translation. A new English message needs its Bengali added by
+  hand, or it shows in English.
+- Not measured: whether Bengali helps her act sooner.

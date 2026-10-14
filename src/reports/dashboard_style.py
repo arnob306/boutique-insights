@@ -65,6 +65,7 @@ CSS = (
     'border-bottom:1px solid var(--rule)}'
     '.action:last-child{border-bottom:0}'
     '.action-text{flex:1}'
+    '.alt{display:block;margin-top:2px;color:var(--ink2);font-size:15px}'
     '.pill{flex:none;display:inline-block;min-width:4.2em;text-align:center;'
     'font-size:12px;font-weight:700;letter-spacing:.02em;padding:2px 10px;'
     'border-radius:12px;white-space:nowrap}'

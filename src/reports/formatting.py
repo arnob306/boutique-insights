@@ -1,5 +1,9 @@
 """Small wording helpers shared by the report, the dashboard and the playbook."""
 
+import html
+
+from src.strings import ENGLISH, Voice
+
 CURRENCY = '$'
 
 
@@ -8,15 +12,18 @@ def money(value: float) -> str:
     return f'{sign}{CURRENCY}{abs(value):,.0f}'
 
 
-def reminder_text(count: int) -> str:
+def reminder_text(count: int, voice: Voice = ENGLISH) -> str:
     """The reminder line for the email and dashboard: how many, never who."""
     if count == 0:
-        return 'Nobody is due a nudge this week.'
-    noun = 'repeat customer is' if count == 1 else 'repeat customers are'
-    return (f'{count} {noun} due a nudge. The list is saved on your computer, '
-            'not in this email.')
+        return voice.say('reminder.none')
+    return voice.say('reminder.one' if count == 1 else 'reminder.many', count=count)
 
 
-def festival_reminder_line(festival: str, count: int) -> str:
-    noun = 'customer' if count == 1 else 'customers'
-    return f'{count} {noun} bought at {festival} last year.'
+def festival_reminder_line(festival: str, count: int, voice: Voice = ENGLISH) -> str:
+    key = 'festival_reminder.one' if count == 1 else 'festival_reminder.many'
+    return voice.say(key, count=count, festival=festival)
+
+
+def html_lines(text: str) -> str:
+    """Escaped text with each line of it on its own line."""
+    return '<br>'.join(html.escape(line.strip()) for line in text.split('\n'))
