@@ -10,6 +10,10 @@ from typing import TYPE_CHECKING, List, Optional
 
 from src.reports.formatting import festival_reminder_line, reminder_text
 from src.reports.playbook import PlaybookItem
+from src.reports.stock_signals import OverstockLine
+from src.validation.checks import STOCK_STALE_AFTER_DAYS
+
+DAYS_PER_WEEK = 7
 
 if TYPE_CHECKING:
     from src.reports.weekly import ReorderLine, WeeklyReport
@@ -65,12 +69,35 @@ def reorder_action(line: 'ReorderLine') -> Action:
     return Action('soon', head + f'stock lasts {weeks_text(cover)}.')
 
 
+def recount_action(r: 'WeeklyReport') -> Optional[Action]:
+    """Ask for fresh stock counts when the numbers behind the advice are old."""
+    if r.recount:
+        old = weeks_text(STOCK_STALE_AFTER_DAYS / DAYS_PER_WEEK)
+        return Action('soon', f"Recount these first: {', '.join(r.recount)}. Their "
+                              f'stock numbers are over {old} old, so the order advice '
+                              'for them may be off.')
+    if r.stock_age_days is not None and r.stock_age_days > STOCK_STALE_AFTER_DAYS:
+        return Action('info', 'Stock was last counted '
+                              f'{weeks_text(r.stock_age_days / DAYS_PER_WEEK)} ago. '
+                              'Recount a few products and update the sheet.')
+    return None
+
+
+def overstock_action(line: OverstockLine) -> Action:
+    return Action('info', f'{line.product}: about {weeks_text(line.weeks_of_cover)} of '
+                          f'stock ({line.stock_now} left) at the current pace. '
+                          'Consider a sale to free up cash.')
+
+
 def build_actions(r: 'WeeklyReport') -> List[Action]:
     """Every action for the week, most urgent first."""
-    found = [a for a in map(festival_action, r.playbook) if a]
+    recount = recount_action(r)
+    found = [recount] if recount else []
+    found += [a for a in map(festival_action, r.playbook) if a]
     found += [reorder_action(line) for line in r.reorder]
     if r.reminder_count:
         found.append(Action('info', reminder_text(r.reminder_count)))
     found += [Action('info', festival_reminder_line(f, n))
               for f, n in r.festival_reminder_counts if n > 0]
+    found += [overstock_action(line) for line in r.overstock]
     return sorted(found, key=lambda a: URGENCY_RANK[a.urgency])

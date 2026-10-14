@@ -11,6 +11,7 @@ from src.metrics.cashplan import CashPlan
 from src.metrics.trends import weekly_series
 from src.reports.dashboard import MAX_ACTIONS, WEEKS_SHOWN, render_dashboard
 from src.reports.playbook import Lift, PlaybookItem
+from src.reports.stock_signals import OverstockLine
 from src.reports.weekly import ReorderLine, money
 
 SALT = 'unit-test-salt-0123456789'
@@ -238,7 +239,8 @@ def _cash(**overrides):
 def _quiet(report, **overrides):
     """The report with nothing that needs doing, plus any overrides."""
     base = replace(report, reorder=(), reorder_status='nothing', playbook=(),
-                   reminder_count=None, festival_reminder_counts=())
+                   reminder_count=None, festival_reminder_counts=(),
+                   stock_age_days=None, recount=(), overstock=())
     return replace(base, **overrides)
 
 
@@ -271,6 +273,23 @@ def test_actions_are_ordered_most_urgent_first(built):
     urgencies = re.findall(r'data-urgency="(\w+)"', _actions_block(page))
     assert urgencies == ['now', 'soon', 'soon', 'info']
     assert _actions_block(page).index('Short Cover') < _actions_block(page).index('Long Cover')
+
+
+def test_a_recount_request_is_a_soon_action_on_the_dashboard(built):
+    _, report, series = built
+    page = render_dashboard(_quiet(report, recount=('Silk Saree', 'Gold Necklace')), series)
+    block = _actions_block(page)
+    assert 'Recount these first: Silk Saree, Gold Necklace.' in block
+    assert 'data-urgency="soon"' in block
+
+
+def test_overstock_is_an_fyi_action_on_the_dashboard(built):
+    _, report, series = built
+    page = render_dashboard(
+        _quiet(report, overstock=(OverstockLine('Old Kurta', 30, 40.0),)), series)
+    block = _actions_block(page)
+    assert 'Old Kurta: about 40 weeks of stock (30 left)' in block
+    assert 'data-urgency="info"' in block
 
 
 def test_a_festival_past_its_order_by_date_is_an_order_now_action(built):

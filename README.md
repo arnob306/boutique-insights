@@ -100,7 +100,9 @@ To create the stock sheet, run
 `python -m src.run --profile private --stock-template data/private/stock_template.xlsx`,
 fill in the numbers, and copy the sheet into the workbook. Columns: stock on
 hand, count date, weeks for a shipment to arrive, minimum order, and what is
-already on order.
+already on order. The advice is only as good as the counts, so "Do this week"
+asks for a recount of any product to order whose count is over three weeks old,
+and flags products with over six months of stock as candidates for a sale.
 
 ## How the answers are worked out
 

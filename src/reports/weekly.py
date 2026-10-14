@@ -27,6 +27,12 @@ from src.reports.playbook import (
     build_playbook,
     lead_weeks_from_stock,
 )
+from src.reports.stock_signals import (
+    OverstockLine,
+    overstock_lines,
+    recount_products,
+    stock_age_days,
+)
 from src.validation.report import ImportReport
 
 WEEK_DAYS = 7
@@ -81,6 +87,9 @@ class WeeklyReport:
     reminder_count: Optional[int] = None  # a count only; names never go in a report
     festival_reminder_counts: Tuple[Tuple[str, int], ...] = ()  # (festival, how many)
     mix_notes: Tuple[str, ...] = ()  # category and channel mix, last 12 months
+    stock_age_days: Optional[int] = None  # days since the newest stock count
+    recount: Tuple[str, ...] = ()  # products to order whose own count is old
+    overstock: Tuple[OverstockLine, ...] = ()  # far more stock than will sell soon
 
 
 # --- building --------------------------------------------------------------
@@ -123,8 +132,9 @@ def _weekly_totals(sales, week_start, week_end) -> dict:
 
 
 def _reorder_lines(data, as_of, calendar, uplift):
+    """(lines to order, status, products with far too much stock)."""
     if data.stock is None:
-        return (), 'no_stock_sheet'
+        return (), 'no_stock_sheet', ()
     suggestions = reorder_suggestions(
         data.sales, data.stock, as_of, calendar=calendar, uplift=uplift,
         forecaster=model_forecaster(data.sales, as_of))
@@ -135,7 +145,7 @@ def _reorder_lines(data, as_of, calendar, uplift):
                     r.confidence, r.note, int(r.on_order))
         for r in needed.itertuples()
     )
-    return lines, ('orders' if lines else 'nothing')
+    return lines, ('orders' if lines else 'nothing'), overstock_lines(suggestions)
 
 
 def _playbook(data, calendar, uplift, today, margin) -> Tuple[PlaybookItem, ...]:
@@ -183,7 +193,7 @@ def build_weekly_report(
     calendar = list(calendar or [])
     uplift = festival_uplift(sales)
 
-    reorder, status = _reorder_lines(data, data_through, calendar, uplift)
+    reorder, status, overstock = _reorder_lines(data, data_through, calendar, uplift)
     top, small, margin = _earners(sales, data_through)
     notes = tuple(
         issue.message for issue in import_report.issues
@@ -198,6 +208,9 @@ def build_weekly_report(
         data_notes=notes, trusted=import_report.ok,
         mix_notes=mix_notes(category_mix(sales, data_through),
                             channel_mix(sales, data_through)),
+        stock_age_days=stock_age_days(data.stock, today),
+        recount=recount_products(data.stock, [line.product for line in reorder], today),
+        overstock=overstock,
     )
 
 
