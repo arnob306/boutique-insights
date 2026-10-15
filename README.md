@@ -89,7 +89,11 @@ schtasks /Create /SC WEEKLY /D MON /ST 08:00 /TN "Boutique weekly report" ^
 ```
 
 If no new workbook is in `data/private/inbox/` that morning, the run stops
-with a clear message (exit code 2) and sends nothing.
+with a clear message (exit code 2) and sends nothing to the shop owner. To
+find out when a scheduled run fails, set `ALERT_TO` in `.env` to your own
+address: with `--send`, a failure (no workbook, data with problems, email
+failure or a crash) then sends you a short fixed note saying what kind of
+problem it was. The note never repeats the error text or any business data.
 
 Exit codes: `0` ok, `1` data not trusted, `2` setup or input problem, `3` email failed.
 

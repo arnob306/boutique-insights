@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from src.adapters.boutique_xlsx import load_workbook_data
+from src.alert import SUBJECT as ALERT_SUBJECT
 from src.decisions.store import (
     Recommendation,
     add_recommendations,
@@ -22,7 +23,7 @@ from src.reminders import (
     load_customer_rows,
 )
 from src.reports.delivery import DeliveryError
-from src.run import main
+from src.run import InputError, main
 
 TODAY = '2026-10-01'
 SALT = 'unit-test-salt-0123456789'
@@ -156,6 +157,133 @@ def test_the_emailed_report_carries_the_bengali_as_utf_8(
     plain = sender.sent[0].get_body(('plain',))
     assert plain.get_content_charset() == 'utf-8'
     assert BENGALI.search(plain.get_content())
+
+
+# --- telling the owner when the weekly run fails ------------------------------------
+
+@pytest.fixture(autouse=True)
+def no_alert_address_from_the_shell(monkeypatch):
+    monkeypatch.delenv('ALERT_TO', raising=False)
+
+
+class FailsOnce(Recorder):
+    """Fails the first email (the report), then accepts the next (the alert)."""
+
+    failed = False
+
+    def __call__(self, settings, message):
+        if not self.failed:
+            self.failed = True
+            raise DeliveryError('Could not send the email.')
+        super().__call__(settings, message)
+
+
+def _mail(monkeypatch, alert='me@example.com'):
+    for key, value in SMTP_ENV.items():
+        monkeypatch.setenv(key, value)
+    if alert:
+        monkeypatch.setenv('ALERT_TO', alert)
+
+
+def _body(message):
+    return message.get_body(('plain',)).get_content()
+
+
+def test_a_missing_workbook_alerts_the_owner_and_not_her(
+        private_root, with_salt, monkeypatch):
+    _mail(monkeypatch)
+    sender = Recorder()
+    assert _private(private_root, '--send', sender=sender) == 2
+    (alert,) = sender.sent
+    assert alert['To'] == 'me@example.com'
+    assert alert['Subject'] == ALERT_SUBJECT
+    assert 'inbox' in _body(alert)
+
+
+def test_untrusted_data_alerts_the_owner_and_nothing_goes_to_her(
+        private_root, with_salt, make_workbook, monkeypatch):
+    _mail(monkeypatch)
+    shutil.copy(make_workbook(problems={'duplicate_id'}),
+                private_root / 'inbox' / 'bad.xlsx')
+    sender = Recorder()
+    assert _private(private_root, '--send', sender=sender) == 1
+    (alert,) = sender.sent
+    assert alert['To'] == 'me@example.com'
+    assert 'problems' in _body(alert)
+
+
+def test_a_failed_report_email_still_alerts_the_owner(
+        private_root, inbox_file, with_salt, monkeypatch):
+    _mail(monkeypatch)
+    sender = FailsOnce()
+    assert _private(private_root, '--send', sender=sender) == 3
+    (alert,) = sender.sent
+    assert alert['To'] == 'me@example.com'
+    assert 'SMTP' in _body(alert)
+
+
+def test_a_good_run_sends_only_the_report(
+        private_root, inbox_file, with_salt, monkeypatch):
+    _mail(monkeypatch)
+    sender = Recorder()
+    assert _private(private_root, '--send', sender=sender) == 0
+    (report,) = sender.sent
+    assert report['To'] == 'mum@example.com'
+
+
+def test_nothing_is_sent_for_a_failure_unless_send_was_asked_for(
+        private_root, with_salt, monkeypatch):
+    _mail(monkeypatch)
+    sender = Recorder()
+    assert _private(private_root, sender=sender) == 2
+    assert sender.sent == []
+
+
+def test_without_an_alert_address_the_run_says_how_to_get_alerts(
+        private_root, with_salt, monkeypatch, capsys):
+    _mail(monkeypatch, alert=None)
+    sender = Recorder()
+    assert _private(private_root, '--send', sender=sender) == 2
+    assert sender.sent == []
+    assert 'ALERT_TO' in capsys.readouterr().out
+
+
+def test_a_failed_alert_never_changes_the_exit_code(
+        private_root, with_salt, monkeypatch, capsys):
+    _mail(monkeypatch)
+    sender = Recorder(error=DeliveryError('Could not send the email.'))
+    assert _private(private_root, '--send', sender=sender) == 2
+    assert 'Could not send the alert' in capsys.readouterr().out
+
+
+def test_the_alert_never_repeats_the_error_text(
+        private_root, with_salt, monkeypatch):
+    _mail(monkeypatch)
+
+    def fail(args):
+        raise InputError('Priya Sharma SECRET-MARKER is missing')
+
+    monkeypatch.setattr('src.run._find_workbook', fail)
+    sender = Recorder()
+    assert _private(private_root, '--send', sender=sender) == 2
+    text = sender.sent[0].as_string() + _body(sender.sent[0])
+    assert 'Priya' not in text and 'SECRET-MARKER' not in text
+
+
+def test_a_crash_alerts_the_owner_and_still_raises(
+        private_root, inbox_file, with_salt, monkeypatch):
+    _mail(monkeypatch)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError('boom Priya Sharma')
+
+    monkeypatch.setattr('src.run._build_report', boom)
+    sender = Recorder()
+    with pytest.raises(RuntimeError, match='boom'):
+        _private(private_root, '--send', sender=sender)
+    (alert,) = sender.sent
+    assert 'unexpected' in _body(alert)
+    assert 'boom' not in _body(alert) and 'Priya' not in _body(alert)
 
 
 def test_private_profile_refuses_to_run_without_a_salt(

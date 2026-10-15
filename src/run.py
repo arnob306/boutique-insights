@@ -32,6 +32,7 @@ import pandas as pd
 from dotenv import load_dotenv
 
 from src.adapters.boutique_xlsx import SchemaError, load_workbook_data
+from src.alert import send_alert
 from src.decisions.evaluate import evaluate_log
 from src.decisions.experiments import track_experiments
 from src.decisions.festival import track_festival_forecasts
@@ -85,6 +86,9 @@ EXIT_OK = 0
 EXIT_UNTRUSTED = 1
 EXIT_INPUT = 2
 EXIT_DELIVERY = 3
+
+# Which alert wording goes with each failing exit code
+ALERT_REASON = {EXIT_UNTRUSTED: 'untrusted', EXIT_INPUT: 'input', EXIT_DELIVERY: 'delivery'}
 
 
 class InputError(RuntimeError):
@@ -345,11 +349,27 @@ def _write_all(args, report, sales) -> None:
 
 
 def main(argv=None, *, sender=send_email, env_file: Optional[str] = '.env') -> int:
-    """Run the pipeline; returns the process exit code."""
+    """Run the pipeline; returns the process exit code.
+
+    With ``--send``, a failed run also emails a short alert to ``ALERT_TO`` (the
+    person running the report), so a silent Monday failure is noticed.
+    """
     logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
     if env_file:
         load_dotenv(env_file)
     args = _parse_args(argv)
+    try:
+        code = _run(args, sender)
+    except Exception:
+        if args.send:
+            _say(send_alert('crash', sender))
+        raise
+    if code != EXIT_OK and args.send:
+        _say(send_alert(ALERT_REASON[code], sender))
+    return code
+
+
+def _run(args, sender) -> int:
     if (args.profile == 'synthetic' and args.file
             and args.demo_output == DEFAULT_DEMO_OUTPUT):
         _say('Cannot run: with --profile synthetic and --file, also give '
