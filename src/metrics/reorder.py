@@ -20,6 +20,8 @@ REVIEW_DAYS = 7
 SAFETY_Z = 1.0
 LOW_CONFIDENCE_BELOW = 6
 GOOD_CONFIDENCE_FROM = 15
+YEAR_DAYS = 364  # 52 weeks, so the same weekday lines up
+MIN_LAST_YEAR_UNITS = 3  # fewer sales than this a year ago is not a seasonal pattern
 
 # Where a product's expected demand came from.
 RULE_BASIS = 'rule'
@@ -48,6 +50,24 @@ def current_stock(sales, product, on_hand, count_date, as_of) -> int:
         & (sales['date'] > count_date) & (sales['date'] <= as_of)
     ]
     return max(0, int(on_hand - since['quantity'].sum()))
+
+
+def _revived_units(sales, product, as_of, horizon_days, modelled) -> int:
+    """Units sold in these weeks a year ago, if a quiet product should be ordered anyway.
+
+    A product with no recent sales is normally left alone, because the model never
+    forecasts exactly zero and would keep ordering for stock she no longer sells.
+    The exception needs the model to expect demand and a real sale at this time
+    last year. Returns 0 when the product should stay at no order.
+    """
+    if not modelled or modelled <= 0:
+        return 0
+    start = as_of + pd.Timedelta(days=1) - pd.Timedelta(days=YEAR_DAYS)
+    end = as_of + pd.Timedelta(days=horizon_days) - pd.Timedelta(days=YEAR_DAYS)
+    last_year = sales[
+        (sales['product'] == product) & (sales['date'] >= start) & (sales['date'] <= end)
+    ]['quantity'].sum()
+    return int(last_year) if last_year >= MIN_LAST_YEAR_UNITS else 0
 
 
 def _festival_factor(calendar, uplift, category, as_of, horizon_days):
@@ -83,26 +103,32 @@ def _suggest(row, sales, velocity, categories, calendar, uplift, as_of,
         'confidence': confidence_label(sales_count),
         'basis': RULE_BASIS,
     }
-    if not per_week > 0:
-        return {**base, 'weeks_of_cover': math.inf, 'expected_demand': 0.0,
-                'safety_stock': 0, 'target': 0.0, 'order_qty': 0,
-                'note': 'no recent sales'}
-
     horizon = int(row.weeks_to_arrive) * 7 + REVIEW_DAYS
+    modelled = model_units(horizon // 7).get(product)
+    revived = 0
+    if not per_week > 0:
+        revived = _revived_units(sales, product, as_of, horizon, modelled)
+        if not revived:
+            return {**base, 'weeks_of_cover': math.inf, 'expected_demand': 0.0,
+                    'safety_stock': 0, 'target': 0.0, 'order_qty': 0,
+                    'note': 'no recent sales'}
+
     factor, notes = _festival_factor(
         calendar, uplift, categories.get(product), as_of, horizon)
-    modelled = model_units(horizon // 7).get(product)
+    if revived:
+        notes.insert(0, f'no recent sales, but {revived} sold in these weeks last year')
     if modelled is None:
         expected = per_week / 7 * horizon * factor
     else:
-        # The model already learns festival weeks, so scaling it again would count them twice.
+        # Backtests (ADR 7) showed the model already captures festival weeks, so
+        # scaling it again counted them twice.
         expected = modelled
         base['basis'] = MODEL_BASIS
     safety = math.ceil(SAFETY_Z * math.sqrt(expected))
     target = expected + safety
     need = max(0, math.ceil(target - stock_now - on_order - 1e-9))
     order_qty = max(need, int(row.min_order_qty)) if need > 0 else 0
-    return {**base, 'weeks_of_cover': stock_now / per_week,
+    return {**base, 'weeks_of_cover': stock_now / per_week if per_week > 0 else math.inf,
             'expected_demand': expected, 'safety_stock': safety,
             'target': target, 'order_qty': order_qty,
             'note': '; '.join(notes) if notes else ''}

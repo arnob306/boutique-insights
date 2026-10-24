@@ -109,6 +109,52 @@ def test_a_product_with_no_recent_sales_is_not_ordered_even_if_the_model_guesses
     assert row['note'] == 'no recent sales'
 
 
+# --- a product that is quiet now but sold at this time last year -------------
+
+def _quiet_now_sold_last_year(units):
+    """Product Z: nothing in the last 13 weeks, `units` in the same weeks a year earlier.
+
+    The default stock sheet asks for lead time 4 weeks + 1, so the horizon is 35 days.
+    """
+    last_year = AS_OF - pd.Timedelta(days=364) + pd.Timedelta(days=10)
+    return pd.concat([
+        weekly_sales(13),
+        make_sales([{'date': last_year, 'product': 'Z', 'qty': units}]),
+    ], ignore_index=True)
+
+
+def test_a_quiet_product_that_sold_in_these_weeks_last_year_is_ordered_from_the_model():
+    row = _row(reorder_suggestions(
+        _quiet_now_sold_last_year(6), stock_frame(product='Z'), AS_OF,
+        forecaster=Recorder({'Z': 8.0})), 'Z')
+    assert row['order_qty'] == 11            # 8 expected + ceil(sqrt(8)) buffer
+    assert row['basis'] == 'model'
+    assert 'last year' in row['note']
+    assert row['weeks_of_cover'] == float('inf')
+
+
+def test_a_quiet_product_with_only_a_stray_sale_last_year_is_not_ordered():
+    row = _row(reorder_suggestions(
+        _quiet_now_sold_last_year(1), stock_frame(product='Z'), AS_OF,
+        forecaster=Recorder({'Z': 8.0})), 'Z')
+    assert row['order_qty'] == 0
+    assert row['note'] == 'no recent sales'
+
+
+def test_a_quiet_product_is_not_ordered_when_the_model_expects_nothing():
+    row = _row(reorder_suggestions(
+        _quiet_now_sold_last_year(6), stock_frame(product='Z'), AS_OF,
+        forecaster=Recorder({'Z': 0.0})), 'Z')
+    assert row['order_qty'] == 0
+
+
+def test_the_rule_alone_never_orders_a_product_with_no_recent_sales():
+    row = _row(reorder_suggestions(
+        _quiet_now_sold_last_year(6), stock_frame(product='Z'), AS_OF), 'Z')
+    assert row['order_qty'] == 0
+    assert row['basis'] == 'rule'
+
+
 # --- the real forecaster ------------------------------------------------------
 
 def test_the_real_forecaster_covers_every_product_with_enough_history():
