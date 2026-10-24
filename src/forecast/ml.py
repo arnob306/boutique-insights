@@ -8,8 +8,9 @@ then sold over the next ``horizon`` weeks. Rows whose target weeks include a
 stock-out or lockdown are left out, as in scoring. The loss is Poisson
 because the target is a count with many small values.
 
-This exists to test whether a heavier model beats the live velocity rule. It
-is not used in the weekly report.
+It beat the velocity rule in backtests (ADR 6) and now drives the weekly reorder
+advice through ``src.forecast.live`` (ADR 7). ``python -m src.forecast --ml``
+still scores it against the other methods.
 """
 
 from typing import Dict, List, Optional, Tuple

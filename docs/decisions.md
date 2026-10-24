@@ -279,8 +279,21 @@ Each reorder row carries `rule` or `model`, and the decision log records
 - Units, not dollars. Leftover cost depends on resale value, which is unknown.
 - One shop, and the model settings were chosen once, not tuned. The buffer
   sweep was run after seeing the first result.
-- Moving lunar festivals may be less well captured than fixed ones. Not
-  separated out.
+- Moving lunar festivals were checked separately afterwards (real ledger,
+  aggregates only, 44 festival windows, forecast made 6 weeks before each
+  window starts, family events excluded). The model was no worse on moving
+  festivals (WAPE 39.7% over 28 windows) than on fixed-date ones (48.4% over
+  16), and beat the velocity rule in all six festivals. That is a different
+  window setup from the table above, each festival has only 6 to 8 windows, and
+  products within a window are not independent, so read it as "no sign of a
+  problem", not proof. The model ran 6 to 7% low on festival units, a mild
+  stock-out risk that the safety buffer partly covers.
+- A product with no sales in the last 13 weeks gets no order, because the model
+  never forecasts exactly zero and would keep ordering for stock she no longer
+  sells. The exception is a quiet product the model expects to sell that also
+  sold at least 3 units in the same weeks a year earlier; its note says so.
+  The rule alone (no model) still never orders a product with no recent sales.
+  The 3-unit floor is a judgement, not tuned on data.
 - Retraining each week costs a few seconds and the choice is deterministic
   (fixed seed). Nothing measures yet whether following the advice helps.
 
