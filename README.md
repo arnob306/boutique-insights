@@ -7,7 +7,8 @@ opens with a "Do this week" list of the few things to act on first, and
 answers five questions:
 
 1. **What should I reorder?**
-2. **Which products actually make money?**
+2. **Which products earn the most gross profit?** Sales minus what the stock
+   cost, before rent, delivery, fees and her own time.
 3. **What should I do about each upcoming festival?** An order-by date, which
    categories usually sell faster, and expected sales for the festival with a
    likely range and a stock budget.
@@ -40,7 +41,14 @@ The shop's real data is never in this repository.
   only, it is never emailed, and the email and dashboard show a count only.
   Tests check that no name appears anywhere else.
 - The weekly report is built from plain arithmetic and templates. No LLM is
-  involved, so no business data is sent to a third party.
+  involved, so no business data is sent to an external AI service. The workbook
+  is processed on the owner's computer. With `--send`, the finished report
+  (sales and profit figures, no customer names) goes out through the mail
+  server set in `.env`, so it does leave the machine.
+- Customer identifiers are pseudonyms, not anonymous: the same customer gets the
+  same hash every run, and anyone with the salt in `.env` could recompute them.
+  Keep the salt private, and note that changing it breaks continuity in the
+  decision log and experiments.
 - The demo, tests and screenshots use a synthetic workbook with invented names
   and perturbed prices (`src/synthetic/`).
 
@@ -116,7 +124,8 @@ and flags products with over six months of stock as candidates for a sale.
 
 ## How the answers are worked out
 
-- **Profit and margin** use the buy price for the year of each sale. Refunded
+- **Profit and margin** are gross: sales minus the buy price for the year of each
+  sale, before rent, delivery, fees and labour. Refunded
   items are assumed to go back on the shelf. Sales with no buy price are left
   out of profit and flagged.
 - **Sales velocity** is units per week over the last 13 weeks. Stock-outs and the
