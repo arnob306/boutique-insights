@@ -249,6 +249,15 @@ def test_text_report_has_the_two_answers(built):
     assert '$' in text
 
 
+def test_profit_is_called_gross_profit_and_says_what_it_leaves_out(built):
+    report = replace(built[1], profit_this_week=120.0, overall_margin=0.45)
+    for page in (render_text(report), render_html(report)):
+        lowered = page.lower()
+        assert 'estimated gross profit' in lowered
+        assert 'rent' in lowered           # the overheads that are not taken off
+        assert 'estimated profit' not in lowered
+
+
 def test_stock_on_order_is_shown_in_the_reorder_line(workbook_path):
     data = load_workbook_data(workbook_path, salt=SALT)
     stock = data.stock.assign(on_order=2, stock_on_hand=0)

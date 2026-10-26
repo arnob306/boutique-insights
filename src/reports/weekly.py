@@ -248,7 +248,7 @@ def _this_week_text(r: WeeklyReport) -> str:
             ' Single weeks vary a lot in a small shop, so look at the trend.'
         )
     if r.profit_this_week is not None:
-        text += f' Estimated profit: {money(r.profit_this_week)}.'
+        text += f' Estimated gross profit: {money(r.profit_this_week)}.'
     if r.refunds_this_week:
         text += f' Refunds: {r.refunds_this_week}.'
     return text
@@ -272,7 +272,7 @@ def reorder_bullet(line: ReorderLine) -> str:
 
 def money_bullet(line: MoneyLine) -> str:
     margin = f', {line.margin * 100:.0f}% margin' if line.margin is not None else ''
-    return f'{line.product}: {money(line.profit)} profit{margin}, {line.units_sold} sold.'
+    return f'{line.product}: {money(line.profit)} gross profit{margin}, {line.units_sold} sold.'
 
 
 Section = Tuple[str, Optional[str], Tuple[str, ...]]  # (title, intro, bullets)
@@ -300,9 +300,10 @@ def _sections(r: WeeklyReport) -> List[Section]:
         reorder = ('Nothing needs ordering right now.', ())
     else:
         reorder = (None, tuple(reorder_bullet(line) for line in r.reorder))
-    money_intro = None
+    money_intro = PROFIT_NOTE
     if r.overall_margin is not None:
-        money_intro = f'Overall margin over the last 12 months: {r.overall_margin * 100:.0f}%.'
+        money_intro = (f'Overall margin over the last 12 months: '
+                       f'{r.overall_margin * 100:.0f}%. {PROFIT_NOTE}')
     sections: List[Section] = [
         _do_this_week(r),
         ('This week', _this_week_text(r), ()),
@@ -322,7 +323,7 @@ def _sections(r: WeeklyReport) -> List[Section]:
     ))
     if r.small_earners:
         sections.append((
-            'Small earners', 'These made the least profit in the last 12 months:',
+            'Small earners', 'These made the least gross profit in the last 12 months:',
             tuple(money_bullet(line) for line in r.small_earners),
         ))
     if r.mix_notes:
@@ -331,6 +332,9 @@ def _sections(r: WeeklyReport) -> List[Section]:
         sections.append(('Things to check in the data', None, r.data_notes))
     return sections
 
+
+PROFIT_NOTE = ('Profit here is sales minus what the stock cost. Rent, delivery, '
+               'fees and your own time are not taken off.')
 
 UNTRUSTED_BANNER = (
     'These numbers are NOT TRUSTED: the data has problems that could make '

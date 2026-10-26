@@ -37,6 +37,7 @@ from src.reports.dashboard_style import CSS
 from src.reports.formatting import html_lines
 from src.reports.playbook import PLAYBOOK_FOOTER, PlaybookItem
 from src.reports.weekly import (
+    PROFIT_NOTE,
     UNTRUSTED_BANNER,
     MoneyLine,
     ReorderLine,
@@ -109,7 +110,7 @@ def _tiles(r: WeeklyReport) -> str:
         profit = money(r.profit_this_week) if r.profit_this_week is not None else 'n/a'
         margin = (f'Margin over the last 12 months: {r.overall_margin * 100:.0f}%'
                   if r.overall_margin is not None else '')
-        tiles.append(_tile('Estimated profit this week', profit, margin))
+        tiles.append(_tile('Estimated gross profit this week', profit, margin))
     return f'<div class="tiles">{"".join(tiles)}</div>'
 
 
@@ -246,7 +247,7 @@ def _table_view(series: pd.DataFrame) -> str:
     return (
         '<details><summary>Show as a table</summary><table><thead><tr>'
         '<th scope="col">Week starting</th><th scope="col">Sales</th>'
-        '<th scope="col">Profit</th></tr></thead>'
+        '<th scope="col">Gross profit</th></tr></thead>'
         f'<tbody>{rows}</tbody></table></details>'
     )
 
@@ -452,7 +453,8 @@ def render_dashboard(r: WeeklyReport, series: pd.DataFrame) -> str:
         ('reorder', 'Reorder', 'Reorder this week', _reorder(r)),
         ('festivals', 'Festivals', 'Festival playbook', _playbook(r)),
         ('customers', 'Customers', 'Customers to nudge', _reminders(r)),
-        ('money', 'Money', 'Profit by product (last 12 months)', _profit_rows(earners)),
+        ('money', 'Money', 'Gross profit by product (last 12 months)',
+         f'<p>{_esc(PROFIT_NOTE)}</p>{_profit_rows(earners)}'),
     ]
     sections = ''.join(_section(anchor, title, body) for anchor, _, title, body in main)
     body = ''.join([

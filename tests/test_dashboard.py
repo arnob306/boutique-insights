@@ -355,6 +355,16 @@ def test_profit_and_margin_have_their_own_tile(built):
     assert money(321.0) in page and '47%' in page
 
 
+def test_dashboard_calls_profit_gross_profit_before_overheads(built):
+    _, report, series = built
+    page = render_dashboard(
+        replace(report, profit_this_week=321.0, overall_margin=0.47), series).lower()
+    assert 'estimated gross profit this week' in page
+    assert 'gross profit by product' in page
+    assert 'rent' in page
+    assert 'estimated profit' not in page
+
+
 # --- the chart gets a reference and a comparison ----------------------------------
 
 def _series(values):
